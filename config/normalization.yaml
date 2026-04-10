@@ -1,0 +1,308 @@
+# StreamWrangler — Normalization Rules
+#
+# Applied in order to clean raw channel display names into canonical names.
+# All rules are deterministic: same input always produces same output.
+
+# ─────────────────────────────────────────────
+# 1. COUNTRY/SOURCE PREFIXES TO STRIP
+#    These appear at the start of display names
+# ─────────────────────────────────────────────
+strip_prefixes:
+  - "US: "
+  - "US:"
+  - "UK: "
+  - "UK:"
+  - "FR: "
+  - "FR:"
+  - "DE: "
+  - "DE:"
+  - "4K: "
+  - "4K:"
+  - "8K: "
+  - "8K:"
+  - "VIP: "
+  - "VIP:"
+  - "PRIME: "
+  - "PRIME:"
+  - "SLING: "
+  - "SLING:"
+  - "CITY: "
+  - "CITY:"
+  - "GO: "
+  - "GO:"
+  - "RK: "
+  - "RK:"
+  - "TUBI: "
+  - "TUBI:"
+  - "USA: "
+  - "USA:"
+  - "UEFA | "
+  - "UEFA  | "
+  - "NOW: "
+  - "NOW:"
+
+# ─────────────────────────────────────────────
+# 2. QUALITY/TECHNICAL SUFFIXES TO STRIP
+#    Removed from end of names (case-insensitive)
+# ─────────────────────────────────────────────
+strip_suffixes:
+  - " FHD"
+  - " UHD"
+  - " 4K"
+  - " HD"
+  - " SD"
+  - " HEVC"
+  - " H265"
+  - " ᴴᴰ"
+  - " ᴿᴬᵂ"
+  - " ⁶⁰ᶠᵖˢ"
+  - " ᵁᴴᴰ"
+  - " ᴺᴹ"
+  - " ◉"
+  - " (A)"
+  - " (D)"
+  - " (H)"
+  - " (S)"
+  - " (PC)"
+  - " (F2)"
+
+# ─────────────────────────────────────────────
+# 3. INLINE NOISE TO REMOVE
+#    Substrings removed anywhere in the name
+# ─────────────────────────────────────────────
+strip_inline:
+  - " ³⁸⁴⁰ᴾ"
+  - " ⱽᴵᴾ"
+  - " ᴾᴿᴱᴹᴵᵁᴹ"
+  - " ⁽ᴮᴷ⁾"
+  - "ᴿᴬᵂ"
+  - "⁶⁰ᶠᵖˢ"
+  - " ʰᵉᵛᶜ"
+
+# ─────────────────────────────────────────────
+# 4. WORD REPLACEMENTS
+#    Applied after prefix/suffix stripping
+#    Format: [from, to]
+# ─────────────────────────────────────────────
+replacements:
+  - ["SP⚽RTS", "SPORTS"]       # emoji in BeIN Sports name
+  - ["BALLY SPORTS KANSAS CITY PLUS", "BALLY SPORTS KC+"]
+  - ["BALLY SPORTS KANSAS CITY", "BALLY SPORTS KC"]
+  - ["FOX SPORTS KANSAS CITY PL", "FOX SPORTS KC+"]
+  - ["FOX SPORTS KANSAS CITY", "FOX SPORTS KC"]
+  - ["SKY SPORTS PREMIER LEAGUE", "SKY SPORTS PREMIER LEAGUE"]
+  - ["PREMIER LEAGUE", "Premier League"]
+  - ["ABC NEWS INTERNATIONAL", "ABC News International"]
+  - ["BBC WORLD NEWS", "BBC World News"]
+
+# ─────────────────────────────────────────────
+# 5. CHANNEL ALLOW LIST
+#    For high-volume groups (US Broadcast, US PPV) only these
+#    canonical names are kept — everything else in the group is dropped.
+#    This is the primary deduplication mechanism.
+#    Format: target_group -> list of allowed canonical name patterns (substring match)
+# ─────────────────────────────────────────────
+allow_lists:
+
+  "US Broadcast":
+    # KC Primary
+    - "ABC 9 (KMBC) KANSAS CITY"
+    - "CBS 5 (KCTV) KANSAS CITY"
+    - "FOX 4 (WDAF) KANSAS CITY"
+    - "NBC 41 (KSHB) KANSAS CITY"
+    - "NBC (KSHB) KANSAS CITY"
+    - "CW 29"
+    # Major markets — HD only
+    - "ABC 7 (KABC) LOS ANGELES"
+    - "ABC 7 (WLS) CHICAGO"
+    - "ABC HD [NEW YORK]"
+    - "NBC 4 (KNBC) LOS ANGELES"
+    - "NBC 5 (WMAQ) CHICAGO"
+    - "NBC 5 CHICAGO IL (WMAQ)"
+    - "ABC (EAST)"
+    - "CBS HD"
+    - "FOX HD"
+    - "NBC HD"
+    - "PBS HD"
+    # Regional sports
+    - "BALLY SPORTS KANSAS CITY"
+    - "FOX SPORTS KANSAS CITY"
+
+  "US News":
+    - "CNN"
+    - "FOX NEWS"
+    - "MSNBC"
+    - "BBC WORLD NEWS"
+    - "ABC NEWS"
+    - "CBS NEWS"
+    - "NBC NEWS"
+    - "BLOOMBERG"
+    - "CNBC"
+    - "C-SPAN"
+    - "AL JAZEERA ENGLISH"
+    - "SKY NEWS"
+    - "EURONEWS"
+    - "THE FIRST"
+    - "NEWSMAX"
+
+  "US Sports":
+    - "ESPN"
+    - "ESPN 2"
+    - "ESPN 3"
+    - "ESPN U"
+    - "FS1"
+    - "FS2"
+    - "FOX SPORTS 1"
+    - "FOX SPORTS 2"
+    - "NFL NETWORK"
+    - "MLB NETWORK"
+    - "NHL NETWORK"
+    - "TENNIS CHANNEL"
+    - "TENNIS CHANNEL 2"
+    - "GOLF CHANNEL"
+    - "THE MASTERS"
+    - "USA NETWORK"
+    - "TNT"
+    - "TBS"
+    - "ACC NETWORK"
+    - "BIG TEN NETWORK"
+    - "SEC NETWORK"
+    - "CBSSN"
+    - "CBS SPORTS NETWORK"
+    - "WILLOW CRICKET"
+    - "PREMIER LEAGUE"
+    - "ALTITUDE SPORTS"
+    - "BALLY SPORTS KC"
+    - "FOX SPORTS KC"
+
+  "US Entertainment":
+    - "HALLMARK"
+    - "GREAT AMERICAN FAMILY"
+    - "GREAT AMERICAN COUNTRY"
+    - "GREAT AMERICAN LIVING"
+    - "GREAT AMERICAN FAITH"
+    - "HISTORY"
+    - "HISTORY 2"
+    - "A&E"
+    - "AMC"
+    - "FX"
+    - "FXX"
+    - "FXM"
+    - "DISCOVERY"
+    - "DISCOVERY SCIENCE"
+    - "DISCOVERY LIFE"
+    - "NATIONAL GEOGRAPHIC"
+    - "NAT GEO WILD"
+    - "SMITHSONIAN"
+    - "PBS"
+    - "HGTV"
+    - "FOOD NETWORK"
+    - "TLC"
+    - "TRAVEL CHANNEL"
+    - "ANIMAL PLANET"
+    - "INVESTIGATION DISCOVERY"
+    - "BRAVO"
+    - "USA NETWORK"
+    - "SYFY"
+    - "TRUTV"
+    - "COMEDY CENTRAL"
+    - "BBC AMERICA"
+
+  "UK General":
+    - "BBC ONE"
+    - "BBC 1"
+    - "BBC TWO"
+    - "BBC 2"
+    - "BBC THREE"
+    - "BBC 3"
+    - "BBC FOUR"
+    - "BBC 4"
+    - "ITV 1"
+    - "ITV 2"
+    - "ITV 3"
+    - "ITV 4"
+    - "ITV BE"
+    - "CHANNEL 4"
+    - "CHANNEL 5"
+    - "E4"
+    - "MORE4"
+    - "FILM4"
+    - "SKY ONE"
+    - "SKY ATLANTIC"
+    - "SKY WITNESS"
+    - "SKY ARTS"
+    - "SKY DOCUMENTARIES"
+    - "SKY HISTORY"
+    - "SKY NEWS"
+    - "SKY MAX"
+    - "GOLD"
+    - "W"
+    - "DAVE"
+    - "ALIBI"
+
+  "UK Sports":
+    - "SKY SPORTS MAIN EVENTS"
+    - "SKY SPORTS FOOTBALL"
+    - "SKY SPORTS PL"
+    - "SKY SPORTS PREMIER LEAGUE"
+    - "SKY SPORTS ACTION"
+    - "SKY SPORTS ARENA"
+    - "SKY SPORTS CRICKET"
+    - "SKY SPORTS GOLF"
+    - "SKY SPORTS TENNIS"
+    - "SKY SPORTS RACING"
+    - "SKY SPORTS MIX"
+    - "SKY SPORTS NEWS"
+    - "TNT SPORTS 1"
+    - "TNT SPORTS 2"
+    - "TNT SPORTS 3"
+    - "TNT SPORTS 4"
+    - "BEIN SPORTS 1"
+    - "BEIN SPORTS 2"
+    - "EUROSPORT 1"
+    - "EUROSPORT 2"
+    - "VIAPLAY SPORTS 1"
+    - "VIAPLAY SPORT 2"
+    - "VIAPLAY XTRA"
+    - "PREMIER SPORTS 1"
+    - "PREMIER SPORTS 2"
+    - "DAZN 1"
+
+  "France General":
+    - "TF1"
+    - "FRANCE 2"
+    - "FRANCE 3"
+    - "FRANCE 4"
+    - "FRANCE 5"
+    - "M6"
+    - "W9"
+    - "TMC"
+    - "TFX"
+    - "TF1 SERIES"
+    - "6TER"
+    - "ARTE"
+    - "CANAL+"
+    - "CANAL+ CINEMA"
+    - "CANAL+ SERIES"
+    - "C8"
+    - "CSTAR"
+    - "GULLI"
+    - "FRANCE 24"
+    - "BFM TV"
+    - "LCI"
+    - "CNEWS"
+    - "RMC"
+
+  "France Sports":
+    - "CANAL+ SPORT"
+    - "CANAL+ SPORT 2"
+    - "CANAL+ SPORT 3"
+    - "CANAL+ SPORT 4"
+    - "BEIN SPORTS"
+    - "BEIN SPORTS 2"
+    - "BEIN SPORTS 3"
+    - "L'EQUIPE"
+    - "EUROSPORT 1"
+    - "EUROSPORT 2"
+    - "RMC SPORT 1"
+    - "RMC SPORT 2"

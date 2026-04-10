@@ -299,9 +299,9 @@ groups:
     enabled: false
 
   - source_group: "US| NBC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
-    target_group: "_excluded"
-    enabled: false
-    notes: "1869 RAW/time-shifted entries — NBC KC (KSHB) comes from DIREC TV group instead"
+    target_group: "US Broadcast"
+    enabled: true
+    notes: "1869 entries but allow list gates it to KSHB KC + select majors only"
 
   - source_group: "US| SLING ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
     target_group: "_excluded"
