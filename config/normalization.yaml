@@ -86,6 +86,8 @@ strip_inline:
 # ─────────────────────────────────────────────
 replacements:
   - ["SP⚽RTS", "SPORTS"]       # emoji in BeIN Sports name
+  - ["BBC 4 / CBEEBIES", "BBC Four"]
+  - ["BBC 3 / CBBC", "BBC Three"]
   - ["BALLY SPORTS KANSAS CITY PLUS", "BALLY SPORTS KC+"]
   - ["BALLY SPORTS KANSAS CITY", "BALLY SPORTS KC"]
   - ["FOX SPORTS KANSAS CITY PL", "FOX SPORTS KC+"]

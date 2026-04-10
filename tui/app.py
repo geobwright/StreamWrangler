@@ -61,6 +61,16 @@ QUALITY_STYLE = {
     "SD":   "dim yellow",
     "":     "dim",
 }
+
+def _quality_from_resolution(width: int, height: int) -> str:
+    """Map actual pixel dimensions to quality tier."""
+    if width >= 3840 or height >= 2160:
+        return "4K"
+    if width >= 1920 or height >= 1080:
+        return "FHD"
+    if width >= 1280 or height >= 720:
+        return "HD"
+    return "SD"
 ALL_GROUP = "__ALL__"
 
 
@@ -68,8 +78,12 @@ def _status_text(status: str) -> Text:
     return Text(STATUS_ICON.get(status, "?"), style=STATUS_STYLE.get(status, ""))
 
 
-def _quality_text(quality: str) -> Text:
-    return Text(quality or "—", style=QUALITY_STYLE.get(quality, "dim"))
+def _quality_text(quality: str, verified: bool = False) -> Text:
+    label = (quality or "—") + ("✓" if verified else "")
+    style = QUALITY_STYLE.get(quality, "dim")
+    if verified:
+        style = "bold " + style.lstrip("bold ")
+    return Text(label, style=style)
 
 
 # ─────────────────────────────────────────────
@@ -323,7 +337,7 @@ class WrangleTUI(App):
         for ch in self._visible_channels():
             table.add_row(
                 _status_text(ch.status),
-                _quality_text(ch.quality),
+                _quality_text(ch.quality, ch.quality_verified),
                 Text(ch.display_name, style=STATUS_STYLE.get(ch.status, "")),
                 Text(ch.target_group, style="dim"),
                 Text(ch.raw_display_name, style="dim italic"),
@@ -335,7 +349,8 @@ class WrangleTUI(App):
         ch = next((c for c in self.channels if c.channel_uid == uid), None)
         if ch is None:
             return
-        table.update_cell(uid, "st", _status_text(ch.status))
+        table.update_cell(uid, "st",   _status_text(ch.status))
+        table.update_cell(uid, "qual", _quality_text(ch.quality, ch.quality_verified))
         table.update_cell(uid, "channel_name",
                           Text(ch.display_name, style=STATUS_STYLE.get(ch.status, "")))
 
@@ -455,6 +470,15 @@ class WrangleTUI(App):
                 w, h = pairs.get("width", ""), pairs.get("height", "")
                 if w and h:
                     lines.append(f"Resolution : {w}x{h}")
+                    # Update channel quality with verified data
+                    try:
+                        verified_q = _quality_from_resolution(int(w), int(h))
+                        ch.quality = verified_q
+                        ch.quality_verified = True
+                        self._refresh_row(ch.channel_uid)
+                        self.unsaved = True
+                    except Exception:
+                        pass
                 if "bit_rate" in pairs:
                     lines.append(f"Bitrate    : {fmt_bitrate(pairs['bit_rate'])}")
                 if "codec_name" in pairs:

@@ -26,6 +26,7 @@ class ChannelRecord:
     tvg_logo: str
     url: str
     quality: str = ""
+    quality_verified: bool = False
     status: STATUS = "pending"
     channel_number: int | None = None
     cuid: str = ""
