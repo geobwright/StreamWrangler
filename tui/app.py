@@ -267,10 +267,10 @@ class WrangleTUI(App):
     def _build_channel_table(self) -> None:
         table = self.query_one("#channel-table", DataTable)
         table.clear(columns=True)
-        table.add_column("St", width=3)
-        table.add_column("Channel Name", width=40)
-        table.add_column("Group", width=18)
-        table.add_column("Source Name", width=35)
+        table.add_column("St", width=3, key="st")
+        table.add_column("Channel Name", width=40, key="channel_name")
+        table.add_column("Group", width=18, key="group")
+        table.add_column("Source Name", width=35, key="source_name")
 
     def _visible_channels(self) -> list[ChannelRecord]:
         chs = self.channels
