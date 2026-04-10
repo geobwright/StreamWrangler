@@ -1,68 +1,71 @@
 # StreamWrangler — Group Filter Configuration
 #
-# Each entry maps a source group_title (from the provider M3U) to a target group
-# in your curated lineup.
+# Two rule types:
+#   source_group:        exact match against provider group-title
+#   source_group_prefix: matches any group-title that starts with this string
 #
-# Structure:
-#   source_group: "exact group-title string from provider"
-#   target_group: "your group name"
-#   enabled: true/false  — false = group exists in config but is excluded from output
-#   seasonal: true/false — true = only included when seasonal flag is on
-#   notes: optional comment
+# Prefix rules are the preferred form — they catch all quality/tier variants
+# (ᴴᴰ, ʰᵉᵛᶜ, ᴿᴬᵂ, ⱽᴵᴾ, ᵁᴴᴰ, etc.) without needing separate entries.
+# Exact rules are used where a prefix would be too broad.
 #
-# Stream quality preference order (applied by normalizer):
-#   FHD > 4K > HD > SD  — "backup", "RAW", "LOW" suffixes are deprioritized
+# Exact rules take priority over prefix rules when both could match.
+#
+# target_group: "_excluded" — never reaches the store (adult, 8K, etc.)
+# enabled: false            — rule exists for reference but is inactive
 
 groups:
 
   # ─────────────────────────────────────────────
-  # US BROADCAST — KC Primary + select major markets
+  # US BROADCAST
   # ─────────────────────────────────────────────
-  - source_group: "US| FOX ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| FOX"
     target_group: "US Broadcast"
     enabled: true
 
-  - source_group: "US| CBS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| CBS"
     target_group: "US Broadcast"
     enabled: true
 
-  - source_group: "US| ABC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| ABC"
     target_group: "US Broadcast"
     enabled: true
 
-  - source_group: "US| CW ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| CW"
     target_group: "US Broadcast"
     enabled: true
 
-  # NBC comes from DIREC TV group (cleaner feed than the 1800-entry RAW group)
   - source_group: "US| DIREC TV ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
     target_group: "US Broadcast"
     enabled: true
-    notes: "NBC KC (KSHB) and select major market NBC/PBS live here"
+    notes: "NBC KC (KSHB) and select major market NBC/PBS — allow list gates this"
+
+  - source_group_prefix: "US| NBC"
+    target_group: "US Broadcast"
+    enabled: true
+    notes: "Allow list in normalization.yaml gates to KSHB KC + select majors"
 
   # ─────────────────────────────────────────────
   # US NEWS
   # ─────────────────────────────────────────────
-  - source_group: "US| NEWS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| NEWS"
     target_group: "US News"
     enabled: true
 
   # ─────────────────────────────────────────────
   # US SPORTS
   # ─────────────────────────────────────────────
-  - source_group: "US| SPORT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| SPORT"
     target_group: "US Sports"
     enabled: true
 
-  - source_group: "US| MAX ESPN ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| MAX ESPN"
     target_group: "US Sports"
     enabled: true
-    notes: "Additional ESPN feeds via MAX"
 
   # ─────────────────────────────────────────────
   # US ENTERTAINMENT
   # ─────────────────────────────────────────────
-  - source_group: "US| ENTERTAINMENT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| ENTERTAINMENT"
     target_group: "US Entertainment"
     enabled: true
     notes: "Hallmark, Great American Family, A&E, AMC, FX, History, Discovery, NatGeo"
@@ -70,31 +73,23 @@ groups:
   # ─────────────────────────────────────────────
   # US PPV / EVENTS
   # ─────────────────────────────────────────────
-  - source_group: "US| NFL PPV"
+  - source_group_prefix: "US| NFL"
     target_group: "US PPV"
     enabled: true
 
-  - source_group: "US| MLB PPV"
+  - source_group_prefix: "US| MLB"
     target_group: "US PPV"
     enabled: true
 
-  - source_group: "US| NHL PPV"
+  - source_group_prefix: "US| NHL"
     target_group: "US PPV"
     enabled: true
 
-  - source_group: "US| MLB TEAM PPV"
+  - source_group_prefix: "US| GOLF PPV"
     target_group: "US PPV"
     enabled: true
 
-  - source_group: "US| NHL TEAM PPV"
-    target_group: "US PPV"
-    enabled: true
-
-  - source_group: "US| GOLF PPV"
-    target_group: "US PPV"
-    enabled: true
-
-  - source_group: "US| PPV EVENT"
+  - source_group_prefix: "US| PPV EVENT"
     target_group: "US PPV"
     enabled: true
 
@@ -102,38 +97,25 @@ groups:
     target_group: "US PPV"
     enabled: true
 
-  - source_group: "US| DAZN PPV"
+  - source_group_prefix: "US| DAZN"
     target_group: "US PPV"
     enabled: true
     notes: "Tennis and boxing"
 
-  - source_group: "US| TENNIS PPV"
+  - source_group_prefix: "US| TENNIS PPV"
     target_group: "US PPV"
     enabled: true
 
-  - source_group: "US| MLS PPV"
+  - source_group_prefix: "US| MLS PPV"
     target_group: "US PPV"
     enabled: true
 
-  - source_group: "US| NFL REPLAY"
-    target_group: "US PPV"
-    enabled: true
-
-  - source_group: "US| NHL REPLAY"
-    target_group: "US PPV"
-    enabled: true
-
-  - source_group: "US| UFC PPV"
+  - source_group_prefix: "US| UFC PPV"
     target_group: "US PPV"
     enabled: false
     notes: "UFC — low priority, enable when needed"
 
-  - source_group: "US| NBA PPV"
-    target_group: "US PPV"
-    enabled: false
-    notes: "NBA — excluded per preference"
-
-  - source_group: "US| NBA TEAM PPV"
+  - source_group_prefix: "US| NBA"
     target_group: "US PPV"
     enabled: false
     notes: "NBA — excluded per preference"
@@ -141,108 +123,82 @@ groups:
   # ─────────────────────────────────────────────
   # UK GENERAL
   # ─────────────────────────────────────────────
-  - source_group: "UK| GENERAL ᴴᴰ/ᴿᴬᵂ"
+  - source_group_prefix: "UK| GENERAL"
     target_group: "UK General"
     enabled: true
 
-  - source_group: "UK| GENERAL ʰᵉᵛᶜ"
+  - source_group_prefix: "UK| NEWS"
     target_group: "UK General"
     enabled: true
-    notes: "HEVC encoded variants — use if HD group missing a channel"
-
-  - source_group: "UK| NEWS ᴴᴰ/ᴿᴬᵂ"
-    target_group: "UK General"
-    enabled: true
-
-  - source_group: "UK| NEWS ʰᵉᵛᶜ"
-    target_group: "UK General"
-    enabled: true
-    notes: "HEVC news variants — includes HEVC HD and HEVC 4K feeds"
 
   # ─────────────────────────────────────────────
-  # UK SPORTS
+  # UK SPORTS — prefix catches ᴴᴰ, ʰᵉᵛᶜ, ᴿᴬᵂ, ⱽᴵᴾ, ᵁᴴᴰ, all variants
   # ─────────────────────────────────────────────
-  - source_group: "UK| SPORT ᴴᴰ"
-    target_group: "UK Sports"
-    enabled: true
-    notes: "Sky Sports, TNT Sports, BeIN Sports, Viaplay — primary UK sport group"
-
-  - source_group: "UK| SPORT ᴴᴰ ⱽᴵᴾ"
-    target_group: "UK Sports"
-    enabled: true
-    notes: "VIP tier HD sport"
-
-  - source_group: "UK| TNT SPORT ᴴᴰ ⱽᴵᴾ"
+  - source_group_prefix: "UK| SPORT"
     target_group: "UK Sports"
     enabled: true
 
-  - source_group: "UK| NOW TV SPORT ᴴᴰ/ᴿᴬᵂ"
+  - source_group_prefix: "UK| TNT SPORT"
     target_group: "UK Sports"
     enabled: true
-    notes: "NOW TV sport package"
+
+  - source_group_prefix: "UK| NOW TV SPORT"
+    target_group: "UK Sports"
+    enabled: true
+
+  - source_group: "4K| ᵁᴴᴰ ³⁸⁴⁰ᴾ"
+    target_group: "UK Sports"
+    enabled: true
+    notes: "Mixed 4K group — ESPN 4K, NOW Sports PL 4K, BeIN 4K, DE Sky Sport 4K"
 
   # ─────────────────────────────────────────────
   # UK PPV / FOOTBALL EVENTS
   # ─────────────────────────────────────────────
-  - source_group: "UK| EPL PREMIER LEAGUE PPV"
-    target_group: "UK Football PPV"
-    enabled: true
-    notes: "Individual EPL matches and team feeds"
-
-  - source_group: "UK| EPL PREMIER LEAGUE PPV ⱽᴵᴾ"
+  - source_group_prefix: "UK| EPL PREMIER LEAGUE PPV"
     target_group: "UK Football PPV"
     enabled: true
 
-  - source_group: "UK| UEFA PPV"
-    target_group: "UK Football PPV"
-    enabled: true
-    notes: "Champions League and Europa League individual matches"
-
-  - source_group: "UK| LIVE FOOTBALL PPV"
+  - source_group_prefix: "UK| UEFA PPV"
     target_group: "UK Football PPV"
     enabled: true
 
-  - source_group: "UK| CHAMPIONSHIP PPV"
+  - source_group_prefix: "UK| LIVE FOOTBALL PPV"
     target_group: "UK Football PPV"
     enabled: true
 
-  - source_group: "UK| LA LIGA TEAM PPV"
+  - source_group_prefix: "UK| CHAMPIONSHIP PPV"
     target_group: "UK Football PPV"
     enabled: true
-    notes: "La Liga individual team feeds"
 
-  - source_group: "UK| LIGUE 1 PPV"
+  - source_group_prefix: "UK| LA LIGA TEAM PPV"
     target_group: "UK Football PPV"
     enabled: true
-    notes: "French league via UK feed"
 
-  - source_group: "UK| TNT SPORT EVENT"
-    target_group: "UK Events PPV"
+  - source_group_prefix: "UK| LIGUE 1 PPV"
+    target_group: "UK Football PPV"
     enabled: true
-    notes: "Boxing, tennis events on TNT"
 
-  - source_group: "UK| FORMULA 1 PPV"
+  - source_group_prefix: "UK| TNT SPORT EVENT"
     target_group: "UK Events PPV"
     enabled: true
 
-  - source_group: "UK| DAZN PPV"
-    target_group: "UK Events PPV"
-    enabled: true
-    notes: "Tennis and boxing"
-
-  - source_group: "UK| DAZN PPV VIP"
+  - source_group_prefix: "UK| FORMULA 1 PPV"
     target_group: "UK Events PPV"
     enabled: true
 
-  - source_group: "UK| PPV EVENT"
+  - source_group_prefix: "UK| DAZN PPV"
     target_group: "UK Events PPV"
     enabled: true
 
-  - source_group: "UK| RUGBY PPV"
+  - source_group_prefix: "UK| PPV EVENT"
     target_group: "UK Events PPV"
     enabled: true
 
-  - source_group: "UK| UFC PPV"
+  - source_group_prefix: "UK| RUGBY PPV"
+    target_group: "UK Events PPV"
+    enabled: true
+
+  - source_group_prefix: "UK| UFC PPV"
     target_group: "UK Events PPV"
     enabled: false
     notes: "UFC — low priority, enable when needed"
@@ -250,105 +206,85 @@ groups:
   # ─────────────────────────────────────────────
   # FRANCE GENERAL
   # ─────────────────────────────────────────────
-  - source_group: "FR| GÉNÉRAL HD/4K"
+  - source_group_prefix: "FR| GÉNÉRAL"
     target_group: "France General"
     enabled: true
-    notes: "TF1, France 2/3/4/5, M6, Canal+, Arte"
 
-  - source_group: "FR| FRANCE HEVC VIP"
+  - source_group_prefix: "FR| FRANCE HEVC"
     target_group: "France General"
     enabled: true
-    notes: "HEVC variants — fallback"
+
+  - source_group_prefix: "FR| CANAL+"
+    target_group: "France General"
+    enabled: true
 
   # ─────────────────────────────────────────────
   # FRANCE SPORT
   # ─────────────────────────────────────────────
-  - source_group: "FR| SPORT HD/4K"
+  - source_group_prefix: "FR| SPORT"
     target_group: "France Sports"
     enabled: true
-    notes: "Canal+ Sport, beIN Sports FR, L'Equipe — Roland Garros + Ligue 1"
 
-  - source_group: "FR| FRANCE SPORT ⱽᴵᴾ ᴿᴬᵂ"
+  - source_group_prefix: "FR| FRANCE SPORT"
     target_group: "France Sports"
     enabled: true
-    notes: "VIP sport feeds"
 
-  - source_group: "FR| MAX PPV"
+  - source_group_prefix: "FR| MAX PPV"
     target_group: "France Sports"
     enabled: true
-    notes: "PPV events via French MAX"
 
-  - source_group: "FR| PREMIUM PLAY"
+  - source_group_prefix: "FR| PREMIUM PLAY"
     target_group: "France Sports"
     enabled: true
-    notes: "Premium sport events"
+
+  - source_group_prefix: "FR| LIGUE1+"
+    target_group: "France Sports"
+    enabled: true
 
   # ─────────────────────────────────────────────
   # GERMANY — off by default, Bundesliga only
   # ─────────────────────────────────────────────
-  - source_group: "DE| 24/7 CINEMA PPV HD/4K"
+  - source_group_prefix: "DE|"
     target_group: "Germany"
     enabled: false
     notes: "German feed — enable for Bundesliga season"
 
   # ─────────────────────────────────────────────
-  # AUSTRALIA — seasonal flag
-  # ─────────────────────────────────────────────
-  # (No AU groups found in current feed — placeholder for when added)
-
-  # ─────────────────────────────────────────────
-  # EXCLUDED — kept for reference, never output
+  # EXCLUDED — never reaches the store
   # ─────────────────────────────────────────────
   - source_group: "FOR ADULTS"
     target_group: "_excluded"
     enabled: false
 
-  - source_group: "US| NBC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
-    target_group: "US Broadcast"
-    enabled: true
-    notes: "1869 entries but allow list gates it to KSHB KC + select majors only"
+  - source_group: "8K| SPORT ON AIR ⁸ᴷ"
+    target_group: "_excluded"
+    enabled: false
+    notes: "8K feed — all RAW duplicates, not useful"
 
-  - source_group: "US| SLING ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| SLING"
     target_group: "_excluded"
     enabled: false
 
-  - source_group: "US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| PRIME"
     target_group: "_excluded"
     enabled: false
 
-  - source_group: "US| ROKU ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| ROKU"
     target_group: "_excluded"
     enabled: false
 
-  - source_group: "US| TUBI ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| TUBI"
     target_group: "_excluded"
     enabled: false
 
-  - source_group: "US| 24/7 COMEDY ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| 24/7"
     target_group: "_excluded"
     enabled: false
 
-  - source_group: "US| 24/7 REALITY ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| CINEMA"
     target_group: "_excluded"
     enabled: false
 
-  - source_group: "US| 24/7 MOVIES/ACTORS ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+  - source_group_prefix: "US| MOVIES"
     target_group: "_excluded"
     enabled: false
-
-  - source_group: "US| CINEMA TV SHOWS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
-    target_group: "_excluded"
-    enabled: false
-
-  - source_group: "US| MOVIES ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
-    target_group: "_excluded"
-    enabled: false
-
-  - source_group: "AL| ALBANIA ᴾᴿᴱᴹᴵᵁᴹ ᴿᴬᵂ"
-    target_group: "_excluded"
-    enabled: false
-
-  - source_group: "FR| FRANCE ⱽᴵᴾ ᴿᴬᵂ"
-    target_group: "_excluded"
-    enabled: false
-    notes: "765-entry RAW feed — use FR| GÉNÉRAL HD/4K instead"

@@ -10,11 +10,17 @@ from .parser import RawChannel
 
 @dataclass
 class GroupRule:
-    source_group: str
+    source_group: str        # exact match (or "" if prefix rule)
+    source_group_prefix: str # prefix match (or "" if exact rule)
     target_group: str
     enabled: bool
     seasonal: bool = False
     notes: str = ""
+
+    def matches(self, group_title: str) -> bool:
+        if self.source_group_prefix:
+            return group_title.startswith(self.source_group_prefix)
+        return group_title == self.source_group
 
 
 def load_group_rules(config_path: Path | str = "config/groups.yaml") -> list[GroupRule]:
@@ -23,7 +29,8 @@ def load_group_rules(config_path: Path | str = "config/groups.yaml") -> list[Gro
     rules = []
     for entry in data.get("groups", []):
         rules.append(GroupRule(
-            source_group=entry["source_group"],
+            source_group=entry.get("source_group", ""),
+            source_group_prefix=entry.get("source_group_prefix", ""),
             target_group=entry["target_group"],
             enabled=entry.get("enabled", True),
             seasonal=entry.get("seasonal", False),
@@ -40,8 +47,12 @@ def build_group_map(
     Build a lookup dict: source_group_title -> target_group_name.
     Only includes enabled rules (and seasonal if include_seasonal=True).
     Excludes rules targeting '_excluded'.
+
+    Exact rules take priority over prefix rules when both could match.
     """
-    mapping = {}
+    exact: dict[str, str] = {}
+    prefix_rules: list[GroupRule] = []
+
     for rule in rules:
         if not rule.enabled:
             continue
@@ -49,8 +60,23 @@ def build_group_map(
             continue
         if rule.target_group == "_excluded":
             continue
-        mapping[rule.source_group] = rule.target_group
-    return mapping
+        if rule.source_group:
+            exact[rule.source_group] = rule.target_group
+        elif rule.source_group_prefix:
+            prefix_rules.append(rule)
+
+    return {"__exact__": exact, "__prefix__": prefix_rules}  # type: ignore[return-value]
+
+
+def _resolve_target(group_title: str, group_map: dict) -> str | None:
+    """Look up a group title against exact and prefix rules."""
+    exact = group_map.get("__exact__", {})
+    if group_title in exact:
+        return exact[group_title]
+    for rule in group_map.get("__prefix__", []):
+        if rule.matches(group_title):
+            return rule.target_group
+    return None
 
 
 def filter_channels(
@@ -58,12 +84,12 @@ def filter_channels(
     group_map: dict[str, str],
 ) -> list[tuple[RawChannel, str]]:
     """
-    Filter channels to only those whose source group is in the group_map.
+    Filter channels to only those whose source group matches a rule.
     Returns list of (RawChannel, target_group) tuples.
     """
     result = []
     for ch in channels:
-        target = group_map.get(ch.group_title)
+        target = _resolve_target(ch.group_title, group_map)
         if target:
             result.append((ch, target))
     return result
@@ -82,7 +108,7 @@ def filter_summary(
 
     unmapped_groups: dict[str, int] = {}
     for ch in channels:
-        if ch.group_title not in group_map:
+        if _resolve_target(ch.group_title, group_map) is None:
             unmapped_groups[ch.group_title] = unmapped_groups.get(ch.group_title, 0) + 1
 
     return {
