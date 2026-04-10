@@ -25,8 +25,11 @@ class ChannelRecord:
     tvg_id: str
     tvg_logo: str
     url: str
-    quality: str = ""
+    quality: str = ""              # actual quality — updated by probe
+    advertised_quality: str = ""  # quality detected from channel name
     quality_verified: bool = False
+    codec: str = ""               # actual codec from probe (e.g. h264, hevc)
+    advertised_codec: str = ""    # codec detected from channel name (e.g. hevc)
     status: STATUS = "pending"
     channel_number: int | None = None
     cuid: str = ""
@@ -40,7 +43,18 @@ def load_store(path: Path = STORE_PATH) -> list[ChannelRecord]:
     if not path.exists():
         return []
     data = json.loads(path.read_text())
-    return [ChannelRecord(**ch) for ch in data]
+    records = []
+    for ch in data:
+        # Migration: HEVC was previously stored as a quality tier; move it to codec
+        is_hevc = ch.get("advertised_quality") == "HEVC" or ch.get("quality") == "HEVC"
+        if is_hevc and not ch.get("advertised_codec"):
+            ch["advertised_codec"] = "hevc"
+        if ch.get("advertised_quality") == "HEVC":
+            ch["advertised_quality"] = "HD"
+        if ch.get("quality") == "HEVC":
+            ch["quality"] = "HD"
+        records.append(ChannelRecord(**ch))
+    return records
 
 
 def save_store(channels: list[ChannelRecord], path: Path = STORE_PATH) -> None:
@@ -76,7 +90,11 @@ def build_store(
                 tvg_id=ch.tvg_id,
                 tvg_logo=ch.tvg_logo,
                 url=ch.url,
-                quality=ch.quality,
+                quality=old.quality,               # preserve probe-verified quality
+                advertised_quality=ch.quality,     # always re-derive from name detection
+                quality_verified=old.quality_verified,
+                codec=old.codec,                   # preserve probe-verified codec
+                advertised_codec=ch.codec_hint,    # always re-derive from name
                 status=old.status,
                 channel_number=old.channel_number,
                 cuid=ch.cuid,
@@ -92,6 +110,8 @@ def build_store(
                 tvg_logo=ch.tvg_logo,
                 url=ch.url,
                 quality=ch.quality,
+                advertised_quality=ch.quality,
+                advertised_codec=ch.codec_hint,
                 cuid=ch.cuid,
             ))
 

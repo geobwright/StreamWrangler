@@ -24,7 +24,8 @@ class NormalizedChannel:
     tvg_id: str
     tvg_logo: str
     url: str
-    quality: str = ""          # Detected quality: 4K, FHD, HD, SD, HEVC, or ""
+    quality: str = ""          # Detected quality: 4K, FHD, HD, SD, or ""
+    codec_hint: str = ""       # Codec detected from name: "hevc" or ""
     cuid: str = ""
 
 
@@ -60,9 +61,13 @@ _QUALITY_PATTERNS = [
     (re.compile(r'\b(4K|UHD|2160|³⁸⁴⁰)', re.IGNORECASE), "4K"),
     (re.compile(r'ᵁᴴᴰ'),                                   "4K"),
     (re.compile(r'\b(FHD|1080)\b', re.IGNORECASE),         "FHD"),
-    (re.compile(r'ʰᵉᵛᶜ|HEVC|H\.?265', re.IGNORECASE),     "HEVC"),
     (re.compile(r'\bHD\b', re.IGNORECASE),                 "HD"),
     (re.compile(r'\b(SD|480|360)\b', re.IGNORECASE),       "SD"),
+]
+
+# Codec hints detected from the raw name — separate from resolution quality
+_CODEC_PATTERNS = [
+    (re.compile(r'ʰᵉᵛᶜ|HEVC|H\.?265', re.IGNORECASE), "hevc"),
 ]
 
 # Streams we deprioritize in selection
@@ -74,20 +79,32 @@ _LOW_PRIORITY_RE = re.compile(
 
 
 def detect_quality(raw_name: str) -> str:
-    """Detect stream quality tier from raw channel name."""
+    """Detect stream quality tier from raw channel name (resolution only, not codec).
+    Returns "" if no quality indicator found — displayed as 'Unk' in the TUI."""
     for pattern, label in _QUALITY_PATTERNS:
         if pattern.search(raw_name):
             return label
-    return "HD"  # Assume HD if no indicator — most linear channels are
+    return ""
 
 
-def quality_score(quality: str, raw_name: str) -> int:
+def detect_codec_hint(raw_name: str) -> str:
+    """Detect codec hint from raw channel name (e.g. 'hevc' from 'BBC One HEVC')."""
+    for pattern, label in _CODEC_PATTERNS:
+        if pattern.search(raw_name):
+            return label
+    return ""
+
+
+def quality_score(quality: str, raw_name: str, codec_hint: str = "") -> int:
     """
     Score a stream variant for selection.
     Higher = better. Used to pick the best stream when deduplicating.
     """
-    base = {"4K": 40, "FHD": 30, "HEVC": 25, "HD": 20, "SD": 10, "": 20}
+    base = {"4K": 40, "FHD": 30, "HD": 20, "SD": 10, "": 15}
     score = base.get(quality, 20)
+    # HEVC/H.265 streams are preferable over plain H.264 at same resolution
+    if codec_hint == "hevc":
+        score += 3
     # Penalise low-priority streams
     if _LOW_PRIORITY_RE.search(raw_name):
         score -= 15
@@ -189,7 +206,8 @@ def normalize_channels(
             continue
 
         quality = detect_quality(raw.display_name)
-        score = quality_score(quality, raw.display_name)
+        codec_hint = detect_codec_hint(raw.display_name)
+        score = quality_score(quality, raw.display_name, codec_hint)
         clean = clean_name(raw.display_name, rules)
 
         if not clean:
@@ -210,21 +228,50 @@ def normalize_channels(
             tvg_logo=raw.tvg_logo,
             url=raw.url,
             quality=quality,
+            codec_hint=codec_hint,
             cuid=raw.cuid,
         )))
 
-    # Pass 2: per uid, keep highest-scoring variant
+    # Pass 2: per uid, keep highest-scoring variant (primary)
     best: dict[str, tuple[int, NormalizedChannel]] = {}
     for uid, score, ch in candidates:
         if uid not in best or score > best[uid][0]:
             best[uid] = (score, ch)
 
-    # Return in original encounter order (stable for consistent output)
+    # Pass 3: find HD backup for premium (4K/FHD) primaries
+    # Backup = best HD variant when primary is 4K or FHD
+    _PREMIUM = {"4K", "FHD"}
+    _BACKUP  = {"HD"}
+    backup: dict[str, tuple[int, NormalizedChannel]] = {}
+    for uid, score, ch in candidates:
+        primary_quality = best[uid][1].quality
+        if primary_quality in _PREMIUM and ch.quality in _BACKUP:
+            if uid not in backup or score > backup[uid][0]:
+                backup[uid] = (score, ch)
+
+    # Build result in original encounter order (primaries first, backup follows its primary)
     seen: set[str] = set()
     result: list[NormalizedChannel] = []
     for uid, _score, ch in candidates:
         if uid not in seen and uid in best and best[uid][1] is ch:
             seen.add(uid)
             result.append(ch)
+            # Append backup immediately after its primary
+            if uid in backup:
+                bk_ch = backup[uid][1]
+                bk_uid = f"{uid}__bk"
+                result.append(NormalizedChannel(
+                    channel_uid=bk_uid,
+                    display_name=bk_ch.display_name,
+                    raw_display_name=bk_ch.raw_display_name,
+                    target_group=bk_ch.target_group,
+                    source_group=bk_ch.source_group,
+                    tvg_id=bk_ch.tvg_id,
+                    tvg_logo=bk_ch.tvg_logo,
+                    url=bk_ch.url,
+                    quality=bk_ch.quality,
+                    codec_hint=bk_ch.codec_hint,
+                    cuid=bk_ch.cuid,
+                ))
 
     return result

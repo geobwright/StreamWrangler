@@ -154,6 +154,11 @@ groups:
     target_group: "UK General"
     enabled: true
 
+  - source_group: "UK| NEWS ʰᵉᵛᶜ"
+    target_group: "UK General"
+    enabled: true
+    notes: "HEVC news variants — includes HEVC HD and HEVC 4K feeds"
+
   # ─────────────────────────────────────────────
   # UK SPORTS
   # ─────────────────────────────────────────────

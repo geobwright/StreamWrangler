@@ -12,7 +12,7 @@ Keybindings:
   A                 Include ALL pending in current group
   X                 Exclude ALL pending in current group
   e                 Edit display name of selected channel
-  p                 Probe selected channel with ffprobe (on-demand)
+  p                 Probe selected channel (resolution + codec via ffprobe)
   /                 Search/filter channels by name
   Escape            Clear search
   s                 Save to channels.json
@@ -21,6 +21,7 @@ Keybindings:
 
 from __future__ import annotations
 
+import re
 import subprocess
 import shutil
 from pathlib import Path
@@ -54,12 +55,11 @@ from streamwrangler.store import ChannelRecord, load_store, save_store, store_su
 STATUS_ICON  = {"pending": "·", "included": "✓", "excluded": "✗"}
 STATUS_STYLE = {"pending": "dim", "included": "bold green", "excluded": "dim red"}
 QUALITY_STYLE = {
-    "4K":   "bold magenta",
-    "FHD":  "bold cyan",
-    "HEVC": "cyan",
-    "HD":   "white",
-    "SD":   "dim yellow",
-    "":     "dim",
+    "4K":  "bold magenta",
+    "FHD": "bold cyan",
+    "HD":  "white",
+    "SD":  "dim yellow",
+    "":    "dim",
 }
 
 def _quality_from_resolution(width: int, height: int) -> str:
@@ -78,12 +78,35 @@ def _status_text(status: str) -> Text:
     return Text(STATUS_ICON.get(status, "?"), style=STATUS_STYLE.get(status, ""))
 
 
-def _quality_text(quality: str, verified: bool = False) -> Text:
-    label = (quality or "—") + ("✓" if verified else "")
-    style = QUALITY_STYLE.get(quality, "dim")
-    if verified:
-        style = "bold " + style.lstrip("bold ")
-    return Text(label, style=style)
+_HEVC_CODECS = {"hevc", "h265", "hvc1"}
+
+
+def _quality_text(quality: str, verified: bool = False, advertised: str = "") -> Text:
+    """Qual column: always advertised/actual✓ after probe, just advertised (or Unk) before."""
+    adv_label = advertised or "Unk"
+    act_label = quality   or "Unk"
+
+    if not verified:
+        return Text(adv_label, style=QUALITY_STYLE.get(advertised, "dim"))
+
+    t = Text()
+    t.append(adv_label, style=QUALITY_STYLE.get(advertised, "dim"))
+    t.append("/", style="dim")
+    act_style = "bold " + QUALITY_STYLE.get(quality, "dim").lstrip("bold ")
+    t.append(act_label + "✓", style=act_style)
+    return t
+
+
+def _channel_name_text(ch: "ChannelRecord") -> Text:
+    """Channel name with optional h265 pill based on advertised/confirmed codec."""
+    t = Text(ch.display_name, style=STATUS_STYLE.get(ch.status, ""))
+    if ch.advertised_codec in _HEVC_CODECS:
+        if not ch.quality_verified:
+            t.append("  h265 ", style="bold white on dark_goldenrod")
+        elif ch.codec in _HEVC_CODECS:
+            t.append("  h265 ", style="bold white on dark_green")
+        # else: probed and NOT h265 — pill removed
+    return t
 
 
 # ─────────────────────────────────────────────
@@ -140,7 +163,7 @@ class ProbeModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="probe-modal"):
-            yield Label(f"Probe: {self.channel_name}", id="probe-title")
+            yield Label(f"[bold cyan]Probe[/bold cyan]  {self.channel_name}", id="probe-title")
             yield Static(self.result, id="probe-result")
             yield Label("[Enter/Escape/Q] Close", id="probe-hint")
 
@@ -238,7 +261,8 @@ class WrangleTUI(App):
         Binding("shift+a",   "include_all_group",  "Incl. group",   show=True),
         Binding("shift+x",   "exclude_all_group",  "Excl. group",   show=True),
         Binding("e",         "edit_name",          "Edit name",     show=True),
-        Binding("p",         "probe_channel",      "Probe stream",  show=True),
+        Binding("p",         "probe_channel",       "Probe",         show=True),
+        Binding("n",         "toggle_sort",         "Sort A-Z",      show=True),
         Binding("u",         "show_url",           "Show URL",      show=True),
         Binding("/",         "start_search",       "Search",        show=True),
         Binding("escape",    "clear_search",       "Clear",         show=False),
@@ -249,6 +273,7 @@ class WrangleTUI(App):
     current_group: reactive[str] = reactive(ALL_GROUP)
     search_query:  reactive[str] = reactive("")
     unsaved:       reactive[bool] = reactive(False)
+    sort_by_name:  reactive[bool] = reactive(False)
 
     def __init__(self, store_path: Path = Path("data/channels.json")) -> None:
         super().__init__()
@@ -317,8 +342,8 @@ class WrangleTUI(App):
         table = self.query_one("#channel-table", DataTable)
         table.clear(columns=True)
         table.add_column("St",           width=3,  key="st")
-        table.add_column("Qual",         width=5,  key="qual")
-        table.add_column("Channel Name", width=38, key="channel_name")
+        table.add_column("Qual",         width=8,  key="qual")
+        table.add_column("Channel Name", width=46, key="channel_name")
         table.add_column("Group",        width=18, key="group")
         table.add_column("Source Name",  width=32, key="source_name")
 
@@ -329,6 +354,8 @@ class WrangleTUI(App):
         if self.search_query:
             q = self.search_query.lower()
             chs = [c for c in chs if q in c.display_name.lower()]
+        if self.sort_by_name:
+            chs = sorted(chs, key=lambda c: c.display_name.upper())
         return chs
 
     def _refresh_channel_table(self) -> None:
@@ -337,8 +364,8 @@ class WrangleTUI(App):
         for ch in self._visible_channels():
             table.add_row(
                 _status_text(ch.status),
-                _quality_text(ch.quality, ch.quality_verified),
-                Text(ch.display_name, style=STATUS_STYLE.get(ch.status, "")),
+                _quality_text(ch.quality, ch.quality_verified, ch.advertised_quality),
+                _channel_name_text(ch),
                 Text(ch.target_group, style="dim"),
                 Text(ch.raw_display_name, style="dim italic"),
                 key=ch.channel_uid,
@@ -350,9 +377,8 @@ class WrangleTUI(App):
         if ch is None:
             return
         table.update_cell(uid, "st",   _status_text(ch.status))
-        table.update_cell(uid, "qual", _quality_text(ch.quality, ch.quality_verified))
-        table.update_cell(uid, "channel_name",
-                          Text(ch.display_name, style=STATUS_STYLE.get(ch.status, "")))
+        table.update_cell(uid, "qual", _quality_text(ch.quality, ch.quality_verified, ch.advertised_quality))
+        table.update_cell(uid, "channel_name", _channel_name_text(ch))
 
     def _channel_at_cursor(self) -> ChannelRecord | None:
         table = self.query_one("#channel-table", DataTable)
@@ -402,6 +428,11 @@ class WrangleTUI(App):
         self._update_status_bar()
         self.unsaved = True
 
+    def action_toggle_sort(self) -> None:
+        self.sort_by_name = not self.sort_by_name
+        self._refresh_channel_table()
+        self._update_status_bar()
+
     def action_exclude_all_group(self) -> None:
         for ch in self._visible_channels():
             if ch.status == "pending":
@@ -424,7 +455,12 @@ class WrangleTUI(App):
 
         self.push_screen(EditNameModal(ch.display_name), apply)
 
-    def action_probe_channel(self) -> None:
+    async def action_probe_channel(self) -> None:
+        await self._do_probe()
+
+    async def _do_probe(self) -> None:
+        import asyncio
+
         ch = self._channel_at_cursor()
         if ch is None:
             self.notify("No channel selected", severity="warning")
@@ -435,69 +471,82 @@ class WrangleTUI(App):
             self.notify("ffprobe not found — install ffmpeg", severity="error")
             return
 
-        self.notify(f"Probing {ch.display_name}…", timeout=2)
+        status_bar = self.query_one("#status-bar", Static)
+        status_bar.update(
+            f"[bold yellow]⟳[/bold yellow] Probing [bold]{ch.display_name}[/bold]…"
+        )
+        await asyncio.sleep(0.1)
 
+        pre_quality = ch.advertised_quality or ch.quality  # what the name says, not last probe
+        pre_codec   = ch.advertised_codec                 # codec hint from channel name
+        lines: list[str] = []
         try:
-            result = subprocess.run(
-                [
-                    ffprobe, "-v", "error",
-                    "-select_streams", "v:0",
-                    "-show_entries", "stream=codec_name,width,height,bit_rate",
-                    "-show_entries", "format=bit_rate,duration",
-                    "-of", "default=noprint_wrappers=1",
-                    "-timeout", "10000000",
-                    ch.url,
-                ],
-                capture_output=True, text=True, timeout=20,
+            cmd = [
+                ffprobe, "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name,width,height,bit_rate",
+                "-show_entries", "format=bit_rate",
+                "-of", "default=noprint_wrappers=1",
+                "-timeout", "15000000",
+                ch.url,
+            ]
+            timeout = 15
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=timeout),
             )
             raw = result.stdout.strip()
             if raw:
-                # Parse key=value pairs into readable output
                 pairs = {}
                 for line in raw.splitlines():
                     if "=" in line:
                         k, v = line.split("=", 1)
-                        pairs[k.strip()] = v.strip()
-
-                def fmt_bitrate(val: str) -> str:
-                    try:
-                        kbps = int(val) // 1000
-                        return f"{kbps:,} kbps"
-                    except Exception:
-                        return val
-
-                lines = []
+                        if k.strip() not in pairs:
+                            pairs[k.strip()] = v.strip()
                 w, h = pairs.get("width", ""), pairs.get("height", "")
                 if w and h:
                     lines.append(f"Resolution : {w}x{h}")
-                    # Update channel quality with verified data
                     try:
                         verified_q = _quality_from_resolution(int(w), int(h))
                         ch.quality = verified_q
                         ch.quality_verified = True
-                        self._refresh_row(ch.channel_uid)
                         self.unsaved = True
+                        if pre_quality != verified_q:
+                            lines.append(f"Quality    : {pre_quality} advertised / {verified_q} actual")
+                        else:
+                            lines.append(f"Quality    : {verified_q} ✓ matches advertised")
                     except Exception:
                         pass
-                if "bit_rate" in pairs:
-                    lines.append(f"Bitrate    : {fmt_bitrate(pairs['bit_rate'])}")
                 if "codec_name" in pairs:
-                    lines.append(f"Codec      : {pairs['codec_name']}")
-                if "duration" in pairs:
+                    actual_codec = pairs["codec_name"].lower()
+                    ch.codec = actual_codec
+                    if pre_codec and pre_codec != actual_codec:
+                        lines.append(f"Codec      : {pre_codec} advertised / {actual_codec} actual ⚠")
+                    elif pre_codec and pre_codec == actual_codec:
+                        lines.append(f"Codec      : {actual_codec} ✓ matches advertised")
+                    else:
+                        lines.append(f"Codec      : {actual_codec}")
+                # Refresh row after ALL fields updated (quality + codec)
+                self._refresh_row(ch.channel_uid)
+                br = pairs.get("bit_rate", "")
+                if br and br not in ("N/A", "0", ""):
                     try:
-                        secs = float(pairs["duration"])
-                        lines.append(f"Duration   : {int(secs//3600)}h {int((secs%3600)//60)}m")
+                        kbps = int(br) // 1000
+                        lines.append(f"Bitrate    : {kbps:,} kbps")
                     except Exception:
-                        pass
-                output = "\n".join(lines) if lines else raw
+                        lines.append(f"Bitrate    : {br}")
             else:
-                output = result.stderr.strip() or "No response — stream may be offline or geo-blocked"
+                err = result.stderr.strip()
+                lines.append(err or "No response — stream may be offline or geo-blocked")
         except subprocess.TimeoutExpired:
-            output = "Timed out after 20s — stream not responding"
+            lines.append("Timed out — stream not responding")
         except Exception as e:
-            output = f"Error: {e}"
+            lines.append(f"Error: {e}")
 
-        self.push_screen(ProbeModal(ch.display_name, output or "No output"))
+        self._update_status_bar()
+        output = "\n".join(lines) if lines else "No output"
+        self.push_screen(ProbeModal(ch.display_name, output))
 
     def action_show_url(self) -> None:
         ch = self._channel_at_cursor()
@@ -544,12 +593,13 @@ class WrangleTUI(App):
     def _update_status_bar(self) -> None:
         s = store_summary(self.channels)
         dirty = "  [yellow]● unsaved[/yellow]" if self.unsaved else ""
+        sort_ind = "  [cyan]⇅ A-Z[/cyan]" if self.sort_by_name else ""
         self.query_one("#status-bar", Static).update(
             f"Total: {s['total']}  "
             f"[green]✓ {s['included']}[/green]  "
             f"[red]✗ {s['excluded']}[/red]  "
             f"[dim]· {s['pending']} pending[/dim]"
-            f"{dirty}"
+            f"{sort_ind}{dirty}"
         )
 
 
