@@ -10,7 +10,9 @@ from rich.table import Table
 from rich import box
 
 from streamwrangler.parser import parse_m3u_list
-from streamwrangler.filter import load_group_rules, build_group_map, filter_summary
+from streamwrangler.filter import load_group_rules, build_group_map, filter_channels, filter_summary
+from streamwrangler.normalizer import load_normalization_rules, normalize_channels
+from streamwrangler.store import load_store, save_store, build_store, store_summary, STORE_PATH
 
 app = typer.Typer(
     name="wrangle",
@@ -153,3 +155,104 @@ def filter_report(
         console.print(f"\n[dim]Top unmapped groups (excluded — {summary['unmapped_group_count']} total):[/dim]")
         for group, count in summary["top_unmapped"][:10]:
             console.print(f"  [dim]{count:>5}  {group}[/dim]")
+
+
+def _run_pipeline(source: Path | None) -> list:
+    """Shared pipeline: parse → filter → normalize."""
+    if source is None:
+        import yaml, httpx
+        cfg = yaml.safe_load(Path("config/config.local.yaml").read_text())
+        url = cfg["provider"]["url"]
+        console.print("[dim]Fetching from provider...[/dim]")
+        response = httpx.get(url, timeout=60, follow_redirects=True)
+        response.raise_for_status()
+        channels = parse_m3u_list(response.text)
+    else:
+        channels = parse_m3u_list(source)
+
+    rules = load_group_rules()
+    group_map = build_group_map(rules)
+    filtered = filter_channels(channels, group_map)
+    norm_rules = load_normalization_rules()
+    return normalize_channels(filtered, norm_rules)
+
+
+@app.command()
+def ingest(
+    source: Annotated[
+        Optional[Path],
+        typer.Argument(help="M3U file to ingest. Uses provider URL if omitted."),
+    ] = None,
+    force: Annotated[bool, typer.Option("--force", help="Re-ingest even if channels.json exists")] = False,
+):
+    """
+    Ingest provider feed → build channels.json.
+    Preserves existing include/exclude decisions on re-ingest.
+    """
+    if STORE_PATH.exists() and not force:
+        console.print(f"[yellow]channels.json already exists.[/yellow] Use --force to re-ingest.")
+        console.print(f"Run [bold]wrangle curate[/bold] to open the curation TUI.")
+        raise typer.Exit()
+
+    console.print("[dim]Running pipeline...[/dim]")
+    normalized = _run_pipeline(source)
+
+    existing = load_store() if STORE_PATH.exists() else []
+    records = build_store(normalized, existing)
+    save_store(records)
+
+    s = store_summary(records)
+    console.print(f"\n[bold green]Ingested {s['total']} channels → data/channels.json[/bold green]")
+
+    table = Table(box=box.SIMPLE_HEAVY)
+    table.add_column("Group", style="cyan")
+    table.add_column("Channels", style="yellow", justify="right")
+    for group, stats in s["by_group"].items():
+        table.add_row(group, str(stats["total"]))
+    console.print(table)
+    console.print(f"\nRun [bold]wrangle curate[/bold] to start curation.")
+
+
+@app.command()
+def curate():
+    """Open the TUI to include/exclude channels."""
+    if not STORE_PATH.exists():
+        console.print("[red]No channels.json found.[/red] Run [bold]wrangle ingest[/bold] first.")
+        raise typer.Exit(1)
+    from tui.app import run_tui
+    run_tui(STORE_PATH)
+
+
+@app.command()
+def status():
+    """Show current curation progress."""
+    if not STORE_PATH.exists():
+        console.print("[red]No channels.json found.[/red] Run [bold]wrangle ingest[/bold] first.")
+        raise typer.Exit(1)
+
+    records = load_store()
+    s = store_summary(records)
+
+    console.print(f"\n[bold]Curation status[/bold]\n")
+    console.print(f"  Total:    {s['total']}")
+    console.print(f"  [green]Included: {s['included']}[/green]")
+    console.print(f"  [red]Excluded: {s['excluded']}[/red]")
+    console.print(f"  [dim]Pending:  {s['pending']}[/dim]")
+    console.print(f"  Numbered: {s['numbered']}\n")
+
+    table = Table(box=box.SIMPLE_HEAVY)
+    table.add_column("Group", style="cyan")
+    table.add_column("Total", justify="right")
+    table.add_column("✓ In", style="green", justify="right")
+    table.add_column("✗ Out", style="red", justify="right")
+    table.add_column("· Pending", style="dim", justify="right")
+
+    for group, stats in s["by_group"].items():
+        table.add_row(
+            group,
+            str(stats["total"]),
+            str(stats["included"]),
+            str(stats["excluded"]),
+            str(stats["pending"]),
+        )
+    console.print(table)
