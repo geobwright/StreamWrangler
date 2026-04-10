@@ -13,6 +13,7 @@ from streamwrangler.parser import parse_m3u_list
 from streamwrangler.filter import load_group_rules, build_group_map, filter_channels, filter_summary
 from streamwrangler.normalizer import load_normalization_rules, normalize_channels
 from streamwrangler.store import load_store, save_store, build_store, store_summary, STORE_PATH
+from streamwrangler.probe_cache import load_probe_cache, CACHE_PATH
 
 app = typer.Typer(
     name="wrangle",
@@ -158,7 +159,7 @@ def filter_report(
 
 
 def _run_pipeline(source: Path | None) -> list:
-    """Shared pipeline: parse → filter → normalize."""
+    """Shared pipeline: parse → filter → normalize (probe-cache-aware)."""
     if source is None:
         import yaml, httpx
         cfg = yaml.safe_load(Path("config/config.local.yaml").read_text())
@@ -174,7 +175,8 @@ def _run_pipeline(source: Path | None) -> list:
     group_map = build_group_map(rules)
     filtered = filter_channels(channels, group_map)
     norm_rules = load_normalization_rules()
-    return normalize_channels(filtered, norm_rules)
+    probe_cache = load_probe_cache()
+    return normalize_channels(filtered, norm_rules, probe_cache=probe_cache)
 
 
 @app.command()
@@ -198,7 +200,8 @@ def ingest(
     normalized = _run_pipeline(source)
 
     existing = load_store() if STORE_PATH.exists() else []
-    records = build_store(normalized, existing)
+    probe_cache = load_probe_cache()
+    records = build_store(normalized, existing, probe_cache=probe_cache)
     save_store(records)
 
     s = store_summary(records)
@@ -221,6 +224,89 @@ def curate():
         raise typer.Exit(1)
     from tui.app import run_tui
     run_tui(STORE_PATH)
+
+
+@app.command()
+def inspect(
+    source: Annotated[
+        Optional[Path],
+        typer.Argument(help="M3U file to inspect. Uses provider URL if omitted."),
+    ] = None,
+):
+    """
+    Browse raw feed variants pre-normalization — probe quality and build probe cache.
+
+    Type a channel name (e.g. 'eurosport') to filter all matching variants.
+    Probe individual streams with p, mark with Space, bulk-probe marked with b,
+    or probe everything visible with a. Results persist to data/probe_cache.json
+    and are applied automatically on the next `wrangle ingest`.
+    """
+    if source is None:
+        try:
+            import yaml
+            cfg = yaml.safe_load(Path("config/config.local.yaml").read_text())
+            url = cfg["provider"]["url"]
+        except Exception:
+            console.print("[red]No source file provided and config/config.local.yaml not found.[/red]")
+            raise typer.Exit(1)
+        console.print("[dim]Fetching from provider...[/dim]")
+        import httpx
+        response = httpx.get(url, timeout=60, follow_redirects=True)
+        response.raise_for_status()
+        channels = parse_m3u_list(response.text)
+    else:
+        console.print(f"[dim]Parsing {source}...[/dim]")
+        channels = parse_m3u_list(source)
+
+    rules = load_group_rules()
+    group_map = build_group_map(rules)
+    filtered = filter_channels(channels, group_map)
+
+    norm_rules = load_normalization_rules()
+
+    from streamwrangler.normalizer import clean_name, detect_quality, detect_codec_hint, is_separator
+    from streamwrangler.probe_cache import extract_channel_id, get_cached_probe
+    from tui.inspect import InspectEntry, run_inspect_tui
+
+    cache = load_probe_cache()
+
+    entries: list[InspectEntry] = []
+    for raw, target_group in filtered:
+        if is_separator(raw.display_name):
+            continue
+        normalized_name = clean_name(raw.display_name, norm_rules)
+        if not normalized_name:
+            continue
+
+        entry = InspectEntry(
+            raw_name=raw.display_name,
+            normalized_name=normalized_name,
+            source_group=raw.group_title,
+            target_group=target_group,
+            url=raw.url,
+            channel_id=extract_channel_id(raw.url),
+            detected_quality=detect_quality(raw.display_name),
+            detected_codec=detect_codec_hint(raw.display_name),
+        )
+
+        # Pre-populate from probe cache so previously-probed channels show results
+        cached = get_cached_probe(raw.url, cache)
+        if cached:
+            entry.probe_quality = cached.get("quality", "")
+            entry.probe_codec = cached.get("codec", "")
+            entry.probe_width = cached.get("width", 0)
+            entry.probe_height = cached.get("height", 0)
+            entry.probe_bitrate_kbps = cached.get("bitrate_kbps", 0)
+            entry.probed = True
+
+        entries.append(entry)
+
+    console.print(
+        f"[bold green]{len(entries):,} channels loaded[/bold green] "
+        f"([dim]{sum(1 for e in entries if e.probed)} previously probed[/dim]) "
+        f"— opening inspector…"
+    )
+    run_inspect_tui(entries, cache, CACHE_PATH)
 
 
 @app.command()

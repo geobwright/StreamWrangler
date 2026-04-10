@@ -16,6 +16,9 @@ pip install -e .
 wrangle ingest                  # first run
 wrangle ingest --force          # re-ingest, preserving include/exclude decisions
 
+# Browse raw feed variants before normalization — probe and rank quality
+wrangle inspect                 # loads full filtered feed, no normalization/dedup
+
 # Open curation TUI
 wrangle curate
 
@@ -33,32 +36,54 @@ Provider URL is stored in `config/config.local.yaml` (gitignored — never commi
 
 ```
 streamwrangler/
-  parser.py       — M3U → RawChannel list
-  filter.py       — groups.yaml → keeps only mapped, enabled groups
-  normalizer.py   — name cleaning, quality/codec detection, variant deduplication
-  store.py        — channels.json read/write, ChannelRecord dataclass
+  parser.py         — M3U → RawChannel list
+  filter.py         — groups.yaml → keeps only mapped, enabled groups
+  normalizer.py     — name cleaning, quality/codec detection, variant deduplication
+  store.py          — channels.json read/write, ChannelRecord dataclass
+  probe_cache.py    — probe result cache keyed by stable channel ID (last URL path segment)
 cli/
-  commands.py     — Typer CLI: ingest, curate, analyze, filter-report, status
+  commands.py       — Typer CLI: ingest, inspect, curate, analyze, filter-report, status
 tui/
-  app.py          — Textual TUI for include/exclude curation
+  app.py            — Textual TUI for include/exclude curation (wrangle curate)
+  inspect.py        — Textual TUI for raw feed browsing and pre-ingest probing (wrangle inspect)
 config/
   groups.yaml           — source group → target group mapping (prefix or exact)
   normalization.yaml    — strip/replace rules for name cleaning
   config.local.yaml     — provider URL (GITIGNORED)
 data/
   channels.json         — canonical channel store (decisions persist here)
+  probe_cache.json      — ffprobe results keyed by channel ID (persists across ingests)
 ```
+
+## Intended Workflow
+
+```
+wrangle ingest          → build initial channels.json
+wrangle inspect         → search channel families (e.g. "eurosport"), probe variants,
+                          see ★ (Tier1 winner) and ◆ (Tier2 winner) rankings
+wrangle ingest --force  → re-run dedup using probe cache for accurate scoring
+wrangle curate          → include/exclude with quality already verified
+wrangle output          → (not yet built) write M3U to Dispatcharr path
+```
+
+The probe cache (`data/probe_cache.json`) persists across all commands and is never
+overwritten by ingest — it only grows. Rankings in inspect are recomputed from the
+cache on every startup.
 
 ## Pipeline
 
 1. **Parse** — `parser.py` reads raw M3U into `RawChannel` objects
-2. **Filter** — `filter.py` applies `groups.yaml`; discards unmapped/disabled groups
+2. **Filter** — `filter.py` applies `groups.yaml`; discards unmapped/disabled groups.
+   `_excluded` target group rules are respected — exact rules block channels that would
+   otherwise match a broader prefix rule.
 3. **Normalize** — `normalizer.py`:
    - Detects quality tier from name: `4K`, `FHD`, `HD`, `SD`, or `""` (unknown → shown as `Unk`)
    - Detects codec hint from name: `hevc` if name contains HEVC/H.265 (separate from quality)
-   - Scores variants; keeps best per channel uid
-   - Appends HD backup (`{uid}__bk`) for channels whose primary is 4K or FHD
-4. **Store** — `store.py` merges normalized channels into `channels.json`, preserving curation decisions
+   - **Probe-aware scoring**: if `probe_cache.json` has a result for a variant's URL, uses
+     actual probe quality for dedup scoring (not just advertised name quality)
+   - Picks best Tier 1 variant as primary; best Tier 2 variant as low-BW backup
+4. **Store** — `store.py` merges normalized channels into `channels.json`, preserving
+   curation decisions. Applies probe cache to set `quality_verified=True` on winners.
 
 ## Group Filter — groups.yaml
 
@@ -70,28 +95,61 @@ Two rule types supported:
   target_group: "UK Sports"
   enabled: true
 
-# Exact match — use where prefix would be too broad
-- source_group: "4K| ᵁᴴᴰ ³⁸⁴⁰ᴾ"
-  target_group: "UK Sports"
+# Exact match — use where prefix would be too broad, or to block a sub-group
+- source_group: "FR| CANAL+ AFRICA"
+  target_group: "_excluded"
   enabled: true
 ```
 
 **Always prefer prefix rules** — they catch `ᴴᴰ`, `ʰᵉᵛᶜ`, `ᴿᴬᵂ`, `ⱽᴵᴾ`, `ᵁᴴᴰ` variants without separate entries. Exact match takes priority when both could match the same group.
 
-## Quality Scoring (variant deduplication)
+**`_excluded` rules work** — an exact `_excluded` rule blocks channels that would
+otherwise match a prefix rule. Use this to suppress sub-groups (e.g. `FR| CANAL+ AFRICA`
+inside the `FR| CANAL+` family).
 
-When multiple variants of the same channel exist, the highest scorer wins:
+## Probe Cache — probe_cache.json
 
-| Quality | Base score |
-|---|---|
-| 4K | 40 |
-| FHD | 30 |
-| HD | 20 |
-| "" (Unk) | 15 |
-| SD | 10 |
+Keyed by **channel ID** — the last path segment of the provider URL:
+```
+http://provider.com/username/password/1537488
+                                       ↑ cache key (stable across credential/domain rotation)
+```
 
-- HEVC codec hint: +3 bonus (prefer H.265 over H.264 at same resolution)
-- RAW/BACKUP/LOW in name: −15 penalty
+Format:
+```json
+{
+  "1537488": { "quality": "FHD", "codec": "h264", "width": 1920, "height": 1080,
+               "bitrate_kbps": 4500, "probed_at": "2026-04-10T..." }
+}
+```
+
+Cache is read-only during `ingest` — never overwritten, only grows via `inspect`.
+
+## Quality Tiers and Variant Deduplication
+
+Variants are split into two tiers. The normalizer picks the **best Tier 1 variant** as
+the primary channel, and the **best Tier 2 variant** as the low-BW backup (only when a
+Tier 1 primary exists). Channels with only Tier 2 variants get a single entry, no backup.
+
+| Tier | Quality | Base score |
+|---|---|---|
+| Tier 1 (high-BW) | 4K | 40 |
+| Tier 1 (high-BW) | FHD | 30 |
+| Tier 2 (low-BW)  | HD | 20 |
+| Tier 2 (low-BW)  | "" (Unk) | 15 |
+| Tier 2 (low-BW)  | SD | 10 |
+
+Score modifiers (applied on top of base — never cross tier boundaries):
+- HEVC codec hint: **+3** (prefer H.265 over H.264 at same resolution)
+- VIP prefix in name: **+2** (tiebreaker within same quality level)
+- RAW/BACKUP/LOW in name: **−15** penalty
+
+Effective score ladder (high to low):
+`4K HEVC VIP (45) > 4K HEVC (43) > 4K VIP (42) > 4K (40) > FHD HEVC VIP (35) > FHD HEVC (33) > FHD VIP (32) > FHD (30) > HD HEVC VIP (25) > HD HEVC (23) > HD VIP (22) > HD (20) > ...`
+
+**⚠ VIP behavior to revisit:** VIP is currently a tiebreaker only and does not override
+quality tier. If provider VIP streams prove more reliable than non-VIP higher-resolution
+streams, the VIP bonus may need to be raised to cross tier boundaries.
 
 ## ChannelRecord fields (channels.json)
 
@@ -103,7 +161,34 @@ When multiple variants of the same channel exist, the highest scorer wins:
 | `codec` | Actual codec from ffprobe (e.g. `h264`, `hevc`) |
 | `advertised_codec` | Codec hint from channel name (e.g. `hevc` if name had HEVC/H.265) |
 
-## TUI Keybindings
+## Inspect TUI Keybindings (wrangle inspect)
+
+| Key | Action |
+|---|---|
+| p | Probe channel at cursor |
+| Space | Mark / unmark for bulk probe |
+| b | Probe all marked channels (concurrent, max 4) |
+| a | Probe all visible channels (concurrent, max 4) |
+| n | Toggle sort by normalized name (clusters variants) |
+| u | Show stream URL |
+| s | Save probe cache |
+| q | Quit (auto-saves) |
+| Escape | Clear search / focus table |
+
+### Inspect Rank Column
+
+| Symbol | Meaning |
+|---|---|
+| `★` green | Tier 1 winner (best 4K/FHD in this normalized-name + target-group) |
+| `◆` cyan | Tier 2 winner (best HD/SD in this normalized-name + target-group) |
+| `#2`, `#3` | Ranked within tier, not the winner |
+| `✗ offline` red | Probed but no response (stream down or geo-blocked) |
+| blank | Not yet probed |
+
+Ranking is grouped by `(normalized_name, target_group)` — UK Sports Eurosport 1 and
+France Sports Eurosport 1 are ranked independently (different languages/feeds).
+
+## Curate TUI Keybindings (wrangle curate)
 
 | Key | Action |
 |---|---|
@@ -120,7 +205,7 @@ When multiple variants of the same channel exist, the highest scorer wins:
 | s | Save |
 | q | Quit (auto-saves) |
 
-## TUI Qual Column Behaviour
+## TUI Qual Column Behaviour (curate)
 
 - **Before probe:** shows quality from name (`HD`, `FHD`, `4K`, `SD`, `Unk`)
 - **After probe:** always `advertised/actual✓` — e.g. `HD/FHD✓`, `HD/HD✓`, `Unk/HD✓`
@@ -132,8 +217,11 @@ When multiple variants of the same channel exist, the highest scorer wins:
 - **Unknown quality shown as `Unk`.** Channels with no quality indicator in name get `quality=""`.
 - **`advertised_quality` always re-derived on ingest.** Reflects current detection logic, not a historical value.
 - **Probe-verified fields preserved across re-ingest** (`quality`, `quality_verified`, `codec`). Advertised fields always refreshed.
+- **Probe-aware dedup** — `normalize_channels()` uses probe cache quality for scoring when available, so the correct variant wins even if the name mis-advertises the resolution.
+- **Probe cache keyed by channel ID** (last URL path segment), not full URL — survives credential and domain rotation.
 - **`channels.json` migration** in `load_store()` handles legacy records where `quality="HEVC"` was stored under the old scheme.
-- **Prefix group matching** — always use `source_group_prefix` in groups.yaml. Exact string matching caused persistent blind spots (entire quality tiers missing).
+- **Prefix group matching** — always use `source_group_prefix` in groups.yaml. Exact string matching caused persistent blind spots.
+- **`_excluded` exact rules** block sub-groups inside a broader prefix family (e.g. `FR| CANAL+ AFRICA` inside `FR| CANAL+`).
 - **Provider URL** contains credentials — stored only in `config/config.local.yaml`, gitignored.
 - **Output M3U** written to `/home/geoffrey/infra/compose/dispatcharr/data/m3us/` (separate repo).
 
@@ -141,6 +229,7 @@ When multiple variants of the same channel exist, the highest scorer wins:
 
 - `output.py` — clean M3U generator (writes final file to Dispatcharr path)
 - `wrangle output` CLI command
+- `wrangle status` dashboard improvements (last ingest date, probe cache stats, next-step suggestions)
 - Channel numbering (`wrangle number`)
 - Claude API classifier for auto-suggest on pending channels
 - Scheduled cron refresh (2-hour interval)

@@ -46,9 +46,10 @@ def build_group_map(
     """
     Build a lookup dict: source_group_title -> target_group_name.
     Only includes enabled rules (and seasonal if include_seasonal=True).
-    Excludes rules targeting '_excluded'.
 
-    Exact rules take priority over prefix rules when both could match.
+    '_excluded' rules ARE included so they can block channels that would otherwise
+    match a broader prefix rule. Exact rules take priority over prefix rules.
+    filter_channels() skips any channel whose resolved target is '_excluded'.
     """
     exact: dict[str, str] = {}
     prefix_rules: list[GroupRule] = []
@@ -57,8 +58,6 @@ def build_group_map(
         if not rule.enabled:
             continue
         if rule.seasonal and not include_seasonal:
-            continue
-        if rule.target_group == "_excluded":
             continue
         if rule.source_group:
             exact[rule.source_group] = rule.target_group
@@ -86,11 +85,12 @@ def filter_channels(
     """
     Filter channels to only those whose source group matches a rule.
     Returns list of (RawChannel, target_group) tuples.
+    Channels resolving to '_excluded' are silently dropped.
     """
     result = []
     for ch in channels:
         target = _resolve_target(ch.group_title, group_map)
-        if target:
+        if target and target != "_excluded":
             result.append((ch, target))
     return result
 

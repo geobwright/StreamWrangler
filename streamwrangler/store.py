@@ -7,9 +7,10 @@ include/exclude/number decisions across sessions.
 import json
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from .normalizer import NormalizedChannel
+from .probe_cache import get_cached_probe
 
 STATUS = Literal["pending", "included", "excluded"]
 STORE_PATH = Path("data/channels.json")
@@ -66,6 +67,7 @@ def save_store(channels: list[ChannelRecord], path: Path = STORE_PATH) -> None:
 def build_store(
     normalized: list[NormalizedChannel],
     existing: list[ChannelRecord] | None = None,
+    probe_cache: dict[str, Any] | None = None,
 ) -> list[ChannelRecord]:
     """
     Build a channel store from normalized channels.
@@ -81,6 +83,11 @@ def build_store(
             # Preserve existing decisions, but update mutable fields
             # (URL may change on provider refresh; logo/tvg_id pass through)
             old = existing_map[ch.channel_uid]
+            # Apply probe cache to records not yet verified (e.g. probed in inspect)
+            if probe_cache and not old.quality_verified:
+                cached = get_cached_probe(ch.url, probe_cache)
+            else:
+                cached = None
             records.append(ChannelRecord(
                 channel_uid=ch.channel_uid,
                 display_name=old.display_name,
@@ -90,16 +97,18 @@ def build_store(
                 tvg_id=ch.tvg_id,
                 tvg_logo=ch.tvg_logo,
                 url=ch.url,
-                quality=old.quality,               # preserve probe-verified quality
+                quality=cached["quality"] if cached else old.quality,
                 advertised_quality=ch.quality,     # always re-derive from name detection
-                quality_verified=old.quality_verified,
-                codec=old.codec,                   # preserve probe-verified codec
+                quality_verified=True if cached else old.quality_verified,
+                codec=cached.get("codec", "") if cached else old.codec,
                 advertised_codec=ch.codec_hint,    # always re-derive from name
                 status=old.status,
                 channel_number=old.channel_number,
                 cuid=ch.cuid,
             ))
         else:
+            # New channel — apply probe cache if available
+            cached = get_cached_probe(ch.url, probe_cache) if probe_cache else None
             records.append(ChannelRecord(
                 channel_uid=ch.channel_uid,
                 display_name=ch.display_name,
@@ -109,8 +118,10 @@ def build_store(
                 tvg_id=ch.tvg_id,
                 tvg_logo=ch.tvg_logo,
                 url=ch.url,
-                quality=ch.quality,
+                quality=cached["quality"] if cached else ch.quality,
                 advertised_quality=ch.quality,
+                quality_verified=bool(cached),
+                codec=cached.get("codec", "") if cached else "",
                 advertised_codec=ch.codec_hint,
                 cuid=ch.cuid,
             ))

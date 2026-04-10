@@ -137,6 +137,23 @@ class EditNameModal(ModalScreen[str | None]):
 class UrlModal(ModalScreen):
     BINDINGS = [Binding("escape,q,enter", "dismiss", "Close")]
 
+    DEFAULT_CSS = """
+    UrlModal { align: center middle; }
+    UrlModal #probe-modal {
+        width: 70; height: 12;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    UrlModal #probe-title {
+        color: $accent;
+        margin-bottom: 1;
+        border-bottom: solid $primary-darken-2;
+    }
+    UrlModal #probe-result { height: 1fr; }
+    UrlModal #probe-hint { margin-top: 1; color: $text-muted; }
+    """
+
     def __init__(self, channel_name: str, url: str) -> None:
         super().__init__()
         self.channel_name = channel_name
@@ -155,6 +172,23 @@ class UrlModal(ModalScreen):
 
 class ProbeModal(ModalScreen):
     BINDINGS = [Binding("escape,q,enter", "dismiss", "Close")]
+
+    DEFAULT_CSS = """
+    ProbeModal { align: center middle; }
+    ProbeModal #probe-modal {
+        width: 70; height: 18;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    ProbeModal #probe-title {
+        color: $accent;
+        margin-bottom: 1;
+        border-bottom: solid $primary-darken-2;
+    }
+    ProbeModal #probe-result { height: 1fr; }
+    ProbeModal #probe-hint { margin-top: 1; color: $text-muted; }
+    """
 
     def __init__(self, channel_name: str, result: str) -> None:
         super().__init__()
@@ -226,7 +260,7 @@ class WrangleTUI(App):
         padding: 0 1;
     }
 
-    EditNameModal, ProbeModal { align: center middle; }
+    EditNameModal { align: center middle; }
 
     #edit-modal {
         width: 60; height: 9;
@@ -236,20 +270,6 @@ class WrangleTUI(App):
     }
     #edit-label { margin-bottom: 1; }
     #edit-hint { margin-top: 1; color: $text-muted; }
-
-    #probe-modal {
-        width: 70; height: 18;
-        border: solid $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #probe-title {
-        color: $accent;
-        margin-bottom: 1;
-        border-bottom: solid $primary-darken-2;
-    }
-    #probe-result { height: 1fr; }
-    #probe-hint { margin-top: 1; color: $text-muted; }
     """
 
     BINDINGS: ClassVar[list[Binding]] = [

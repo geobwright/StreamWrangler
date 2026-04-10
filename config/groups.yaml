@@ -214,6 +214,11 @@ groups:
     target_group: "France General"
     enabled: true
 
+  - source_group: "FR| CANAL+ AFRICA"
+    target_group: "_excluded"
+    enabled: true
+    notes: "African feed nested inside FR| CANAL+ group tree — exact rule blocks before prefix fires"
+
   - source_group_prefix: "FR| CANAL+"
     target_group: "France General"
     enabled: true

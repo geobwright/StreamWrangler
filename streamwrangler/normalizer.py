@@ -77,6 +77,12 @@ _LOW_PRIORITY_RE = re.compile(
     r'|\s+\([ADHS]\)\s*$'   # trailing (A) (D) (H) (S) alternate feed markers
 )
 
+# VIP prefix — preferred within the same quality tier, but does not override quality.
+# Tiebreaker only: VIP FHD beats plain FHD, but VIP HD still loses to plain FHD.
+# NOTE: whether VIP should ever override quality is undecided — revisit if provider
+# VIP streams are found to be consistently more reliable than non-VIP higher-res streams.
+_VIP_RE = re.compile(r'(^|\|)\s*VIP\b', re.IGNORECASE)
+
 
 def detect_quality(raw_name: str) -> str:
     """Detect stream quality tier from raw channel name (resolution only, not codec).
@@ -99,12 +105,19 @@ def quality_score(quality: str, raw_name: str, codec_hint: str = "") -> int:
     """
     Score a stream variant for selection.
     Higher = better. Used to pick the best stream when deduplicating.
+
+    Tier 1 (high-BW) scores: 4K HEVC=43, 4K=40, FHD HEVC=33, FHD=30
+    Tier 2 (low-BW)  scores: HD HEVC=23,  HD=20, SD HEVC=13,  SD=10
+    VIP bonus (+2) is a tiebreaker within the same quality level — never crosses tiers.
     """
     base = {"4K": 40, "FHD": 30, "HD": 20, "SD": 10, "": 15}
     score = base.get(quality, 20)
     # HEVC/H.265 streams are preferable over plain H.264 at same resolution
     if codec_hint == "hevc":
         score += 3
+    # VIP prefix is preferred within same quality level (tiebreaker only)
+    if _VIP_RE.search(raw_name):
+        score += 2
     # Penalise low-priority streams
     if _LOW_PRIORITY_RE.search(raw_name):
         score -= 15
@@ -191,13 +204,20 @@ def passes_allow_list(clean: str, target_group: str, allow_lists: dict) -> bool:
 def normalize_channels(
     filtered: list[tuple[RawChannel, str]],
     rules: NormalizationRules,
+    probe_cache: dict | None = None,
 ) -> list[NormalizedChannel]:
     """
     Normalize filtered channels.
     - Detects quality for each variant
     - Groups variants by (uid, target_group)
     - Keeps the highest-quality stream per channel
+
+    If probe_cache is provided, probe-verified quality is used for scoring
+    (dedup picks the right winner) while advertised quality is still stored
+    in NormalizedChannel.quality for display and re-derivation in build_store().
     """
+    from .probe_cache import get_cached_probe
+
     # Pass 1: clean, detect quality, filter
     candidates: list[tuple[str, int, NormalizedChannel]] = []  # (uid, score, channel)
 
@@ -207,7 +227,19 @@ def normalize_channels(
 
         quality = detect_quality(raw.display_name)
         codec_hint = detect_codec_hint(raw.display_name)
-        score = quality_score(quality, raw.display_name, codec_hint)
+
+        # Use probe-verified quality for scoring when available — picks the
+        # correct dedup winner even if the name mis-advertises the resolution.
+        # Advertised quality (quality) is still stored for display purposes.
+        if probe_cache:
+            cached = get_cached_probe(raw.url, probe_cache)
+            score_quality = cached["quality"] if cached and cached.get("quality") else quality
+            score_codec   = cached.get("codec", codec_hint) if cached else codec_hint
+        else:
+            score_quality = quality
+            score_codec   = codec_hint
+
+        score = quality_score(score_quality, raw.display_name, score_codec)
         clean = clean_name(raw.display_name, rules)
 
         if not clean:
@@ -238,14 +270,16 @@ def normalize_channels(
         if uid not in best or score > best[uid][0]:
             best[uid] = (score, ch)
 
-    # Pass 3: find HD backup for premium (4K/FHD) primaries
-    # Backup = best HD variant when primary is 4K or FHD
-    _PREMIUM = {"4K", "FHD"}
-    _BACKUP  = {"HD"}
+    # Pass 3: find low-BW backup for Tier 1 primaries.
+    # Tier 1 (high-BW): 4K, FHD — primary slot
+    # Tier 2 (low-BW):  HD, SD, Unk — backup slot
+    # Only created when primary is Tier 1; picks the best Tier 2 variant by score.
+    _TIER1 = {"4K", "FHD"}
+    _TIER2 = {"HD", "SD", ""}
     backup: dict[str, tuple[int, NormalizedChannel]] = {}
     for uid, score, ch in candidates:
         primary_quality = best[uid][1].quality
-        if primary_quality in _PREMIUM and ch.quality in _BACKUP:
+        if primary_quality in _TIER1 and ch.quality in _TIER2:
             if uid not in backup or score > backup[uid][0]:
                 backup[uid] = (score, ch)
 
