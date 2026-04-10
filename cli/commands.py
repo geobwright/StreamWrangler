@@ -10,6 +10,7 @@ from rich.table import Table
 from rich import box
 
 from streamwrangler.parser import parse_m3u_list
+from streamwrangler.filter import load_group_rules, build_group_map, filter_summary
 
 app = typer.Typer(
     name="wrangle",
@@ -102,3 +103,53 @@ def analyze(
         ctable.add_row(prefix, str(count), str(len(prefix_groups[prefix])))
 
     console.print(ctable)
+
+
+@app.command()
+def filter_report(
+    source: Annotated[
+        Optional[Path],
+        typer.Argument(help="M3U file to filter. Uses provider URL if omitted."),
+    ] = None,
+    seasonal: Annotated[bool, typer.Option("--seasonal", help="Include seasonal groups (AU, etc.)")] = False,
+):
+    """Show what passes through the group filter — counts by target group."""
+
+    if source is None:
+        try:
+            import yaml
+            cfg = yaml.safe_load(Path("config/config.local.yaml").read_text())
+            url = cfg["provider"]["url"]
+        except Exception:
+            console.print("[red]No source file provided and config/config.local.yaml not found.[/red]")
+            raise typer.Exit(1)
+        console.print("[dim]Fetching from provider...[/dim]")
+        import httpx
+        response = httpx.get(url, timeout=60, follow_redirects=True)
+        response.raise_for_status()
+        channels = parse_m3u_list(response.text)
+    else:
+        console.print(f"[dim]Parsing {source}...[/dim]")
+        channels = parse_m3u_list(source)
+
+    rules = load_group_rules()
+    group_map = build_group_map(rules, include_seasonal=seasonal)
+    summary = filter_summary(channels, group_map)
+
+    console.print(f"\n[bold]Input:[/bold]  {summary['total_input']:,} channels")
+    console.print(f"[bold green]Output:[/bold green] {summary['total_output']:,} channels\n")
+
+    table = Table(title="Channels by Target Group", box=box.SIMPLE_HEAVY)
+    table.add_column("Target Group", style="cyan")
+    table.add_column("Channels", style="yellow", justify="right")
+
+    for group, count in sorted(summary["by_target_group"].items()):
+        table.add_row(group, str(count))
+    table.add_row("[dim]TOTAL[/dim]", f"[bold]{summary['total_output']:,}[/bold]")
+
+    console.print(table)
+
+    if summary["top_unmapped"]:
+        console.print(f"\n[dim]Top unmapped groups (excluded — {summary['unmapped_group_count']} total):[/dim]")
+        for group, count in summary["top_unmapped"][:10]:
+            console.print(f"  [dim]{count:>5}  {group}[/dim]")
