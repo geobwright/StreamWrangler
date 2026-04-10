@@ -14,6 +14,7 @@ from streamwrangler.filter import load_group_rules, build_group_map, filter_chan
 from streamwrangler.normalizer import load_normalization_rules, normalize_channels
 from streamwrangler.store import load_store, save_store, build_store, store_summary, STORE_PATH
 from streamwrangler.probe_cache import load_probe_cache, CACHE_PATH
+from streamwrangler.numbering import load_numbering, save_numbering, apply_numbering, NUMBERING_PATH
 
 app = typer.Typer(
     name="wrangle",
@@ -307,6 +308,70 @@ def inspect(
         f"— opening inspector…"
     )
     run_inspect_tui(entries, cache, CACHE_PATH)
+
+
+@app.command()
+def number(
+    generate: Annotated[bool, typer.Option("--generate", help="Re-generate AI proposal even if numbering.yaml exists")] = False,
+    apply: Annotated[bool, typer.Option("--apply", help="Apply numbering.yaml to channels.json without opening TUI")] = False,
+):
+    """
+    Assign channel numbers via AI proposal + interactive TUI.
+
+    First run: calls Claude API to propose a logical numbered lineup, saves
+    config/numbering.yaml, then opens the TUI to review and adjust.
+
+    Subsequent runs: opens existing numbering.yaml directly in the TUI.
+
+    Use --generate to force a fresh AI proposal (overwrites existing numbering.yaml).
+    Use --apply to write numbers and display names to channels.json without the TUI.
+    """
+    if not STORE_PATH.exists():
+        console.print("[red]No channels.json found.[/red] Run [bold]wrangle ingest[/bold] first.")
+        raise typer.Exit(1)
+
+    channels = load_store()
+    included_count = sum(1 for c in channels if c.status == "included")
+    if included_count == 0:
+        console.print("[yellow]No included channels found.[/yellow] Run [bold]wrangle curate[/bold] first.")
+        raise typer.Exit(1)
+
+    plan = None
+
+    if not generate and NUMBERING_PATH.exists():
+        plan = load_numbering()
+        if plan:
+            console.print(
+                f"[dim]Loaded existing numbering.yaml — "
+                f"{sum(len(b.channels) for b in plan.blocks)} channels across "
+                f"{len(plan.blocks)} blocks.[/dim]"
+            )
+
+    if plan is None:
+        console.print(
+            f"[dim]Calling Claude API to propose numbering for {included_count} included channels…[/dim]"
+        )
+        try:
+            from streamwrangler.ai_numbering import propose_numbering
+            plan = propose_numbering(channels)
+        except Exception as e:
+            console.print(f"[red]AI proposal failed:[/red] {e}")
+            raise typer.Exit(1)
+
+        save_numbering(plan)
+        console.print(
+            f"[bold green]AI proposed {sum(len(b.channels) for b in plan.blocks)} channels "
+            f"across {len(plan.blocks)} blocks → config/numbering.yaml[/bold green]"
+        )
+
+    if apply:
+        updated = apply_numbering(plan, channels)
+        save_store(channels)
+        console.print(f"[bold green]Applied {updated} channel numbers to channels.json[/bold green]")
+        return
+
+    from tui.number import run_number_tui
+    run_number_tui(plan, STORE_PATH)
 
 
 @app.command()

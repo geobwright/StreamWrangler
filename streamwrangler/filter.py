@@ -86,9 +86,17 @@ def filter_channels(
     Filter channels to only those whose source group matches a rule.
     Returns list of (RawChannel, target_group) tuples.
     Channels resolving to '_excluded' are silently dropped.
+
+    URL filters applied here (before any downstream processing):
+    - pro.* hostnames are dropped — duplicate entries from Geoffrey's own domain
+      that appear in the provider feed. Temporary: he owns pro. and it may return.
     """
     result = []
     for ch in channels:
+        # Drop channels served from the pro.* hostname — feed contamination from
+        # Geoffrey's own domain. Remove this block if pro. returns as a valid source.
+        if "://pro." in ch.url:
+            continue
         target = _resolve_target(ch.group_title, group_map)
         if target and target != "_excluded":
             result.append((ch, target))

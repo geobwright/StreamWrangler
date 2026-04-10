@@ -98,14 +98,20 @@ def _quality_text(quality: str, verified: bool = False, advertised: str = "") ->
 
 
 def _channel_name_text(ch: "ChannelRecord") -> Text:
-    """Channel name with optional h265 pill based on advertised/confirmed codec."""
+    """Channel name with optional h265 pill based on advertised/confirmed codec.
+
+    Green  = probe confirmed HEVC (quality_verified + codec is hevc)
+    Yellow = name advertises HEVC but not yet probed
+    No pill = probed and NOT hevc, or neither advertised nor confirmed
+    """
     t = Text(ch.display_name, style=STATUS_STYLE.get(ch.status, ""))
-    if ch.advertised_codec in _HEVC_CODECS:
-        if not ch.quality_verified:
-            t.append("  h265 ", style="bold white on dark_goldenrod")
-        elif ch.codec in _HEVC_CODECS:
-            t.append("  h265 ", style="bold white on dark_green")
-        # else: probed and NOT h265 — pill removed
+    confirmed_hevc = ch.quality_verified and ch.codec in _HEVC_CODECS
+    advertised_unconfirmed = ch.advertised_codec in _HEVC_CODECS and not ch.quality_verified
+
+    if confirmed_hevc:
+        t.append("  h265 ", style="bold white on dark_green")
+    elif advertised_unconfirmed:
+        t.append("  h265 ", style="bold white on dark_goldenrod")
     return t
 
 

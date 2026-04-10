@@ -10,6 +10,10 @@ build/
 config/config.local.yaml
 .env
 
+# Personal lineup decisions — not shared
+config/numbering.yaml
+data/probe_cache.json
+
 # Data files (generated)
 data/channels.json
 data/queue.json

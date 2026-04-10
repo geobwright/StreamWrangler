@@ -22,6 +22,11 @@ wrangle inspect                 # loads full filtered feed, no normalization/ded
 # Open curation TUI
 wrangle curate
 
+# Assign channel numbers — AI proposes, TUI to review/adjust
+wrangle number                  # generate AI proposal (if no numbering.yaml) then open TUI
+wrangle number --generate       # force-regenerate AI proposal, overwrite numbering.yaml
+wrangle number --apply          # apply numbering.yaml to channels.json headlessly
+
 # Inspect feed without ingesting
 wrangle analyze                 # group/channel counts from provider URL
 wrangle filter-report           # what passes the group filter
@@ -37,18 +42,22 @@ Provider URL is stored in `config/config.local.yaml` (gitignored — never commi
 ```
 streamwrangler/
   parser.py         — M3U → RawChannel list
-  filter.py         — groups.yaml → keeps only mapped, enabled groups
+  filter.py         — groups.yaml → keeps only mapped, enabled groups; URL filters (pro.* blocked)
   normalizer.py     — name cleaning, quality/codec detection, variant deduplication
   store.py          — channels.json read/write, ChannelRecord dataclass
   probe_cache.py    — probe result cache keyed by stable channel ID (last URL path segment)
+  numbering.py      — YAML-backed channel numbering; language tag detection; display name builder
+  ai_numbering.py   — Claude API (opus-4-6) proposal for block grouping and number assignment
 cli/
-  commands.py       — Typer CLI: ingest, inspect, curate, analyze, filter-report, status
+  commands.py       — Typer CLI: ingest, inspect, curate, number, analyze, filter-report, status
 tui/
   app.py            — Textual TUI for include/exclude curation (wrangle curate)
   inspect.py        — Textual TUI for raw feed browsing and pre-ingest probing (wrangle inspect)
+  number.py         — Textual TUI for reviewing/adjusting AI-proposed channel numbering
 config/
   groups.yaml           — source group → target group mapping (prefix or exact)
   normalization.yaml    — strip/replace rules for name cleaning
+  numbering.yaml        — AI-proposed + user-adjusted channel numbering plan (gitignored)
   config.local.yaml     — provider URL (GITIGNORED)
 data/
   channels.json         — canonical channel store (decisions persist here)
@@ -63,6 +72,7 @@ wrangle inspect         → search channel families (e.g. "eurosport"), probe va
                           see ★ (Tier1 winner) and ◆ (Tier2 winner) rankings
 wrangle ingest --force  → re-run dedup using probe cache for accurate scoring
 wrangle curate          → include/exclude with quality already verified
+wrangle number          → AI proposes block/number layout → review in TUI → apply
 wrangle output          → (not yet built) write M3U to Dispatcharr path
 ```
 
@@ -209,7 +219,10 @@ France Sports Eurosport 1 are ranked independently (different languages/feeds).
 
 - **Before probe:** shows quality from name (`HD`, `FHD`, `4K`, `SD`, `Unk`)
 - **After probe:** always `advertised/actual✓` — e.g. `HD/FHD✓`, `HD/HD✓`, `Unk/HD✓`
-- **h265 pill on channel name:** yellow = advertised but unconfirmed; green = probe confirmed; removed if probe finds non-HEVC codec
+- **h265 pill on channel name:**
+  - Yellow = name advertises HEVC, not yet probed
+  - Green = probe confirmed HEVC (regardless of whether name advertised it)
+  - No pill = probed and codec is NOT HEVC, or neither advertised nor confirmed
 
 ## Key Design Decisions
 
@@ -225,11 +238,54 @@ France Sports Eurosport 1 are ranked independently (different languages/feeds).
 - **Provider URL** contains credentials — stored only in `config/config.local.yaml`, gitignored.
 - **Output M3U** written to `/home/geoffrey/infra/compose/dispatcharr/data/m3us/` (separate repo).
 
+## Channel Numbering — wrangle number
+
+Numbering plan lives in `config/numbering.yaml` (gitignored — contains personal lineup decisions).
+
+**Display name format:** `<base> <quality> [LANG]` — e.g. `Eurosport 1 FHD`, `Eurosport 1 HD [FR]`
+- Quality suffix: probe-verified if available, else advertised. Omitted if empty.
+- Language tag: non-English source groups only (FR, DE, ES, IT, PT, NL, …). UK/US/AU = no tag.
+- Backup channels (`__bk`) get their own row and number, placed immediately after their primary.
+
+**YAML schema:**
+```yaml
+blocks:
+  - name: Sports
+    start: 400
+    channels:
+      - uid: eurosport_1__uk_sports
+        number: 401
+        display_name: Eurosport 1 FHD
+      - uid: eurosport_1__uk_sports__bk
+        number: 402
+        display_name: Eurosport 1 HD
+```
+
+**Number TUI keybindings:**
+
+| Key | Action |
+|---|---|
+| Tab / Shift+Tab | Switch focus block list ↔ channel table |
+| Shift+J / Shift+K | Move channel down / up within block |
+| e | Edit display name |
+| # | Edit channel number |
+| m | Move channel to a different block |
+| s | Save numbering.yaml |
+| a | Apply to channels.json (writes numbers + display names) |
+| q | Quit (auto-saves) |
+
+## URL Filters (filter.py)
+
+Applied in `filter_channels()` before any downstream processing:
+
+- **`pro.*` hostnames** — dropped. Geoffrey owns this domain; channels appeared as feed
+  contamination but are not valid provider streams. Remove the `://pro.` check if the
+  domain returns as a legitimate source.
+
 ## What's Not Built Yet
 
 - `output.py` — clean M3U generator (writes final file to Dispatcharr path)
 - `wrangle output` CLI command
 - `wrangle status` dashboard improvements (last ingest date, probe cache stats, next-step suggestions)
-- Channel numbering (`wrangle number`)
 - Claude API classifier for auto-suggest on pending channels
 - Scheduled cron refresh (2-hour interval)
