@@ -94,6 +94,25 @@ class EditNameModal(ModalScreen[str | None]):
 
 
 # ─────────────────────────────────────────────
+# URL Modal
+# ─────────────────────────────────────────────
+
+class UrlModal(ModalScreen):
+    BINDINGS = [Binding("escape,q,enter", "dismiss", "Close")]
+
+    def __init__(self, channel_name: str, url: str) -> None:
+        super().__init__()
+        self.channel_name = channel_name
+        self.url = url
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="probe-modal"):
+            yield Label(f"Stream URL — {self.channel_name}", id="probe-title")
+            yield Static(self.url, id="probe-result")
+            yield Label("Select text above and Cmd+C to copy  |  [Enter/Escape] Close", id="probe-hint")
+
+
+# ─────────────────────────────────────────────
 # Probe Result Modal
 # ─────────────────────────────────────────────
 
@@ -206,6 +225,7 @@ class WrangleTUI(App):
         Binding("shift+x",   "exclude_all_group",  "Excl. group",   show=True),
         Binding("e",         "edit_name",          "Edit name",     show=True),
         Binding("p",         "probe_channel",      "Probe stream",  show=True),
+        Binding("u",         "show_url",           "Show URL",      show=True),
         Binding("/",         "start_search",       "Search",        show=True),
         Binding("escape",    "clear_search",       "Clear",         show=False),
         Binding("s",         "save",               "Save",          show=True),
@@ -454,6 +474,13 @@ class WrangleTUI(App):
             output = f"Error: {e}"
 
         self.push_screen(ProbeModal(ch.display_name, output or "No output"))
+
+    def action_show_url(self) -> None:
+        ch = self._channel_at_cursor()
+        if ch is None:
+            self.notify("No channel selected", severity="warning")
+            return
+        self.push_screen(UrlModal(ch.display_name, ch.url))
 
     def action_start_search(self) -> None:
         bar = self.query_one("#search-bar")
