@@ -25,6 +25,7 @@ class ChannelRecord:
     tvg_id: str
     tvg_logo: str
     url: str
+    quality: str = ""
     status: STATUS = "pending"
     channel_number: int | None = None
     cuid: str = ""
@@ -67,14 +68,15 @@ def build_store(
             old = existing_map[ch.channel_uid]
             records.append(ChannelRecord(
                 channel_uid=ch.channel_uid,
-                display_name=old.display_name,   # Keep any edits made in TUI
+                display_name=old.display_name,
                 raw_display_name=ch.raw_display_name,
                 target_group=ch.target_group,
                 source_group=ch.source_group,
                 tvg_id=ch.tvg_id,
                 tvg_logo=ch.tvg_logo,
-                url=ch.url,                       # Always use latest URL
-                status=old.status,                # Preserve decision
+                url=ch.url,
+                quality=ch.quality,
+                status=old.status,
                 channel_number=old.channel_number,
                 cuid=ch.cuid,
             ))
@@ -88,6 +90,7 @@ def build_store(
                 tvg_id=ch.tvg_id,
                 tvg_logo=ch.tvg_logo,
                 url=ch.url,
+                quality=ch.quality,
                 cuid=ch.cuid,
             ))
 

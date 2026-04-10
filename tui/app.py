@@ -2,7 +2,7 @@
 StreamWrangler TUI — channel curation interface.
 
 Pass 1: Include / Exclude decisions.
-Pass 2 (separate): Channel number assignment.
+Pass 2 (separate): Channel number assignment via `wrangle number`.
 
 Keybindings:
   Tab / Shift+Tab   Switch focus between group list and channel table
@@ -12,14 +12,17 @@ Keybindings:
   A                 Include ALL pending in current group
   X                 Exclude ALL pending in current group
   e                 Edit display name of selected channel
+  p                 Probe selected channel with ffprobe (on-demand)
   /                 Search/filter channels by name
   Escape            Clear search
   s                 Save to channels.json
-  q                 Quit (prompts to save if unsaved changes)
+  q                 Quit (auto-saves)
 """
 
 from __future__ import annotations
 
+import subprocess
+import shutil
 from pathlib import Path
 from typing import ClassVar
 
@@ -38,25 +41,35 @@ from textual.widgets import (
     ListView,
     Static,
 )
-from textual import on, work
+from textual import on
 from rich.text import Text
 
 from streamwrangler.store import ChannelRecord, load_store, save_store, store_summary
 
 
 # ─────────────────────────────────────────────
-# Helpers
+# Constants
 # ─────────────────────────────────────────────
 
-STATUS_ICON = {"pending": "·", "included": "✓", "excluded": "✗"}
+STATUS_ICON  = {"pending": "·", "included": "✓", "excluded": "✗"}
 STATUS_STYLE = {"pending": "dim", "included": "bold green", "excluded": "dim red"}
+QUALITY_STYLE = {
+    "4K":   "bold magenta",
+    "FHD":  "bold cyan",
+    "HEVC": "cyan",
+    "HD":   "white",
+    "SD":   "dim yellow",
+    "":     "dim",
+}
 ALL_GROUP = "__ALL__"
 
 
 def _status_text(status: str) -> Text:
-    icon = STATUS_ICON.get(status, "?")
-    style = STATUS_STYLE.get(status, "")
-    return Text(icon, style=style)
+    return Text(STATUS_ICON.get(status, "?"), style=STATUS_STYLE.get(status, ""))
+
+
+def _quality_text(quality: str) -> Text:
+    return Text(quality or "—", style=QUALITY_STYLE.get(quality, "dim"))
 
 
 # ─────────────────────────────────────────────
@@ -64,11 +77,7 @@ def _status_text(status: str) -> Text:
 # ─────────────────────────────────────────────
 
 class EditNameModal(ModalScreen[str | None]):
-    """Simple modal for editing a channel display name."""
-
-    BINDINGS = [
-        Binding("escape", "dismiss(None)", "Cancel"),
-    ]
+    BINDINGS = [Binding("escape", "dismiss(None)", "Cancel")]
 
     def __init__(self, current_name: str) -> None:
         super().__init__()
@@ -82,6 +91,25 @@ class EditNameModal(ModalScreen[str | None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value.strip() or None)
+
+
+# ─────────────────────────────────────────────
+# Probe Result Modal
+# ─────────────────────────────────────────────
+
+class ProbeModal(ModalScreen):
+    BINDINGS = [Binding("escape,q,enter", "dismiss", "Close")]
+
+    def __init__(self, channel_name: str, result: str) -> None:
+        super().__init__()
+        self.channel_name = channel_name
+        self.result = result
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="probe-modal"):
+            yield Label(f"Probe: {self.channel_name}", id="probe-title")
+            yield Static(self.result, id="probe-result")
+            yield Label("[Enter/Escape/Q] Close", id="probe-hint")
 
 
 # ─────────────────────────────────────────────
@@ -109,21 +137,15 @@ class WrangleTUI(App):
     """StreamWrangler channel curation TUI."""
 
     CSS = """
-    Screen {
-        layout: vertical;
-    }
+    Screen { layout: vertical; }
 
-    #main-area {
-        layout: horizontal;
-        height: 1fr;
-    }
+    #main-area { layout: horizontal; height: 1fr; }
 
     #group-panel {
         width: 28;
         border: solid $primary;
         padding: 0 1;
     }
-
     #group-title {
         text-align: center;
         color: $accent;
@@ -131,10 +153,7 @@ class WrangleTUI(App):
         border-bottom: solid $primary-darken-2;
     }
 
-    #channel-panel {
-        width: 1fr;
-        border: solid $primary;
-    }
+    #channel-panel { width: 1fr; border: solid $primary; }
 
     #search-bar {
         height: 3;
@@ -142,10 +161,7 @@ class WrangleTUI(App):
         display: none;
         border-bottom: solid $primary-darken-2;
     }
-
-    #search-bar.visible {
-        display: block;
-    }
+    #search-bar.visible { display: block; }
 
     #status-bar {
         height: 1;
@@ -154,53 +170,56 @@ class WrangleTUI(App):
         padding: 0 1;
     }
 
-    EditNameModal {
-        align: center middle;
-    }
+    EditNameModal, ProbeModal { align: center middle; }
 
     #edit-modal {
-        width: 60;
-        height: 9;
+        width: 60; height: 9;
         border: solid $accent;
         background: $surface;
         padding: 1 2;
     }
+    #edit-label { margin-bottom: 1; }
+    #edit-hint { margin-top: 1; color: $text-muted; }
 
-    #edit-label {
+    #probe-modal {
+        width: 70; height: 18;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #probe-title {
+        color: $accent;
         margin-bottom: 1;
+        border-bottom: solid $primary-darken-2;
     }
-
-    #edit-hint {
-        margin-top: 1;
-        color: $text-muted;
-    }
+    #probe-result { height: 1fr; }
+    #probe-hint { margin-top: 1; color: $text-muted; }
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("tab", "focus_next", "Switch panel", show=False),
-        Binding("shift+tab", "focus_previous", "Switch panel", show=False),
-        Binding("space", "toggle_channel", "Include/Exclude", show=True),
-        Binding("i", "include_channel", "Include", show=False),
-        Binding("x", "exclude_channel", "Exclude", show=True),
-        Binding("shift+a", "include_all_group", "Include group", show=True),
-        Binding("shift+x", "exclude_all_group", "Exclude group", show=True),
-        Binding("e", "edit_name", "Edit name", show=True),
-        Binding("/", "start_search", "Search", show=True),
-        Binding("escape", "clear_search", "Clear", show=False),
-        Binding("s", "save", "Save", show=True),
-        Binding("q", "quit_app", "Quit", show=True),
+        Binding("tab",       "focus_next",        "Switch panel",  show=False),
+        Binding("shift+tab", "focus_previous",     "Switch panel",  show=False),
+        Binding("space",     "toggle_channel",     "Include/Excl",  show=True),
+        Binding("i",         "include_channel",    "Include",       show=False),
+        Binding("x",         "exclude_channel",    "Exclude",       show=True),
+        Binding("shift+a",   "include_all_group",  "Incl. group",   show=True),
+        Binding("shift+x",   "exclude_all_group",  "Excl. group",   show=True),
+        Binding("e",         "edit_name",          "Edit name",     show=True),
+        Binding("p",         "probe_channel",      "Probe stream",  show=True),
+        Binding("/",         "start_search",       "Search",        show=True),
+        Binding("escape",    "clear_search",       "Clear",         show=False),
+        Binding("s",         "save",               "Save",          show=True),
+        Binding("q",         "quit_app",           "Quit",          show=True),
     ]
 
-    # Reactive state
     current_group: reactive[str] = reactive(ALL_GROUP)
-    search_query: reactive[str] = reactive("")
-    unsaved: reactive[bool] = reactive(False)
+    search_query:  reactive[str] = reactive("")
+    unsaved:       reactive[bool] = reactive(False)
 
     def __init__(self, store_path: Path = Path("data/channels.json")) -> None:
         super().__init__()
         self.store_path = store_path
         self.channels: list[ChannelRecord] = load_store(store_path)
-        self._uid_to_row: dict[str, int] = {}   # channel_uid -> DataTable row key
 
     # ── Compose ──────────────────────────────
 
@@ -226,7 +245,7 @@ class WrangleTUI(App):
     # ── Group list ───────────────────────────
 
     def _groups(self) -> list[str]:
-        seen = []
+        seen: list[str] = []
         for c in self.channels:
             if c.target_group not in seen:
                 seen.append(c.target_group)
@@ -234,14 +253,11 @@ class WrangleTUI(App):
 
     def _group_label(self, group: str) -> str:
         if group == ALL_GROUP:
-            summary = store_summary(self.channels)
-            done = summary["included"] + summary["excluded"]
-            return f"All  [{done}/{summary['total']}]"
+            s = store_summary(self.channels)
+            return f"All  [{s['included']}/{s['total']}]"
         chs = [c for c in self.channels if c.target_group == group]
-        done = sum(1 for c in chs if c.is_decided())
         inc = sum(1 for c in chs if c.status == "included")
-        short = group[:20]
-        return f"{short}  [{inc}/{len(chs)}]"
+        return f"{group[:20]}  [{inc}/{len(chs)}]"
 
     def _build_group_list(self) -> None:
         lv = self.query_one("#group-list", ListView)
@@ -251,8 +267,7 @@ class WrangleTUI(App):
             lv.append(GroupItem(g, self._group_label(g)))
 
     def _refresh_group_labels(self) -> None:
-        lv = self.query_one("#group-list", ListView)
-        for item in lv.query(GroupItem):
+        for item in self.query_one("#group-list", ListView).query(GroupItem):
             item.update_label(self._group_label(item.group))
 
     @on(ListView.Selected, "#group-list")
@@ -267,10 +282,11 @@ class WrangleTUI(App):
     def _build_channel_table(self) -> None:
         table = self.query_one("#channel-table", DataTable)
         table.clear(columns=True)
-        table.add_column("St", width=3, key="st")
-        table.add_column("Channel Name", width=40, key="channel_name")
-        table.add_column("Group", width=18, key="group")
-        table.add_column("Source Name", width=35, key="source_name")
+        table.add_column("St",           width=3,  key="st")
+        table.add_column("Qual",         width=5,  key="qual")
+        table.add_column("Channel Name", width=38, key="channel_name")
+        table.add_column("Group",        width=18, key="group")
+        table.add_column("Source Name",  width=32, key="source_name")
 
     def _visible_channels(self) -> list[ChannelRecord]:
         chs = self.channels
@@ -284,19 +300,17 @@ class WrangleTUI(App):
     def _refresh_channel_table(self) -> None:
         table = self.query_one("#channel-table", DataTable)
         table.clear()
-        self._uid_to_row.clear()
         for ch in self._visible_channels():
-            row_key = table.add_row(
+            table.add_row(
                 _status_text(ch.status),
+                _quality_text(ch.quality),
                 Text(ch.display_name, style=STATUS_STYLE.get(ch.status, "")),
                 Text(ch.target_group, style="dim"),
                 Text(ch.raw_display_name, style="dim italic"),
                 key=ch.channel_uid,
             )
-            self._uid_to_row[ch.channel_uid] = row_key
 
     def _refresh_row(self, uid: str) -> None:
-        """Refresh the status icon and name style for a single row."""
         table = self.query_one("#channel-table", DataTable)
         ch = next((c for c in self.channels if c.channel_uid == uid), None)
         if ch is None:
@@ -306,7 +320,6 @@ class WrangleTUI(App):
                           Text(ch.display_name, style=STATUS_STYLE.get(ch.status, "")))
 
     def _channel_at_cursor(self) -> ChannelRecord | None:
-        """Get the channel at the current cursor row using simple index lookup."""
         table = self.query_one("#channel-table", DataTable)
         if table.row_count == 0:
             return None
@@ -324,7 +337,7 @@ class WrangleTUI(App):
         self._refresh_group_labels()
         self._update_status_bar()
         self.unsaved = True
-        # Advance cursor to next row
+        # Advance cursor
         table = self.query_one("#channel-table", DataTable)
         next_row = table.cursor_row + 1
         if next_row < table.row_count:
@@ -332,10 +345,8 @@ class WrangleTUI(App):
 
     def action_toggle_channel(self) -> None:
         ch = self._channel_at_cursor()
-        if ch is None:
-            return
-        new_status = "excluded" if ch.status == "included" else "included"
-        self._set_status(ch, new_status)
+        if ch:
+            self._set_status(ch, "excluded" if ch.status == "included" else "included")
 
     def action_include_channel(self) -> None:
         ch = self._channel_at_cursor()
@@ -370,13 +381,79 @@ class WrangleTUI(App):
         if ch is None:
             return
 
-        def apply_edit(new_name: str | None) -> None:
+        def apply(new_name: str | None) -> None:
             if new_name and new_name != ch.display_name:
                 ch.display_name = new_name
                 self._refresh_row(ch.channel_uid)
                 self.unsaved = True
 
-        self.push_screen(EditNameModal(ch.display_name), apply_edit)
+        self.push_screen(EditNameModal(ch.display_name), apply)
+
+    def action_probe_channel(self) -> None:
+        ch = self._channel_at_cursor()
+        if ch is None:
+            self.notify("No channel selected", severity="warning")
+            return
+
+        ffprobe = shutil.which("ffprobe")
+        if not ffprobe:
+            self.notify("ffprobe not found — install ffmpeg", severity="error")
+            return
+
+        self.notify(f"Probing {ch.display_name}…", timeout=2)
+
+        try:
+            result = subprocess.run(
+                [
+                    ffprobe, "-v", "error",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=codec_name,width,height,bit_rate",
+                    "-show_entries", "format=bit_rate,duration",
+                    "-of", "default=noprint_wrappers=1",
+                    "-timeout", "10000000",
+                    ch.url,
+                ],
+                capture_output=True, text=True, timeout=20,
+            )
+            raw = result.stdout.strip()
+            if raw:
+                # Parse key=value pairs into readable output
+                pairs = {}
+                for line in raw.splitlines():
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        pairs[k.strip()] = v.strip()
+
+                def fmt_bitrate(val: str) -> str:
+                    try:
+                        kbps = int(val) // 1000
+                        return f"{kbps:,} kbps"
+                    except Exception:
+                        return val
+
+                lines = []
+                w, h = pairs.get("width", ""), pairs.get("height", "")
+                if w and h:
+                    lines.append(f"Resolution : {w}x{h}")
+                if "bit_rate" in pairs:
+                    lines.append(f"Bitrate    : {fmt_bitrate(pairs['bit_rate'])}")
+                if "codec_name" in pairs:
+                    lines.append(f"Codec      : {pairs['codec_name']}")
+                if "duration" in pairs:
+                    try:
+                        secs = float(pairs["duration"])
+                        lines.append(f"Duration   : {int(secs//3600)}h {int((secs%3600)//60)}m")
+                    except Exception:
+                        pass
+                output = "\n".join(lines) if lines else raw
+            else:
+                output = result.stderr.strip() or "No response — stream may be offline or geo-blocked"
+        except subprocess.TimeoutExpired:
+            output = "Timed out after 20s — stream not responding"
+        except Exception as e:
+            output = f"Error: {e}"
+
+        self.push_screen(ProbeModal(ch.display_name, output or "No output"))
 
     def action_start_search(self) -> None:
         bar = self.query_one("#search-bar")
@@ -385,8 +462,7 @@ class WrangleTUI(App):
 
     def action_clear_search(self) -> None:
         self.search_query = ""
-        bar = self.query_one("#search-bar")
-        bar.remove_class("visible")
+        self.query_one("#search-bar").remove_class("visible")
         self.query_one("#search-bar", Input).value = ""
         self._refresh_channel_table()
         self.query_one("#channel-table").focus()
@@ -404,40 +480,28 @@ class WrangleTUI(App):
         save_store(self.channels, self.store_path)
         self.unsaved = False
         self._update_status_bar()
-        self.notify("Saved to channels.json", severity="information")
+        self.notify("Saved", severity="information", timeout=2)
 
     def action_quit_app(self) -> None:
         if self.unsaved:
-            self.notify("Unsaved changes — press S to save first, or Q again to force quit",
-                        severity="warning", timeout=4)
-            self.BINDINGS = [b for b in self.BINDINGS if b.key != "q"] + [
-                Binding("q", "force_quit", "Force Quit", show=False)
-            ]
-        else:
-            self.exit()
-
-    def action_force_quit(self) -> None:
+            save_store(self.channels, self.store_path)
+            self.notify("Auto-saved before quit", timeout=1)
         self.exit()
 
     # ── Status bar ───────────────────────────
 
     def _update_status_bar(self) -> None:
         s = store_summary(self.channels)
-        dirty = " [yellow]●unsaved[/yellow]" if self.unsaved else ""
-        text = (
+        dirty = "  [yellow]● unsaved[/yellow]" if self.unsaved else ""
+        self.query_one("#status-bar", Static).update(
             f"Total: {s['total']}  "
             f"[green]✓ {s['included']}[/green]  "
             f"[red]✗ {s['excluded']}[/red]  "
             f"[dim]· {s['pending']} pending[/dim]"
             f"{dirty}"
         )
-        self.query_one("#status-bar", Static).update(text)
-
-    def on_reactive_changed(self) -> None:
-        self._update_status_bar()
 
 
 def run_tui(store_path: Path = Path("data/channels.json")) -> None:
-    """Launch the TUI."""
     app = WrangleTUI(store_path=store_path)
     app.run()
