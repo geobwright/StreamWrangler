@@ -296,43 +296,29 @@ class WrangleTUI(App):
             self._uid_to_row[ch.channel_uid] = row_key
 
     def _refresh_row(self, uid: str) -> None:
-        """Refresh a single row without rebuilding the whole table."""
+        """Refresh the status icon and name style for a single row."""
         table = self.query_one("#channel-table", DataTable)
         ch = next((c for c in self.channels if c.channel_uid == uid), None)
         if ch is None:
             return
-        table.update_cell(uid, "St", _status_text(ch.status))
-        table.update_cell(uid, "Channel Name",
-                          Text(ch.display_name, style=STATUS_STYLE.get(ch.status, "")))
-
-    def _selected_channel(self) -> ChannelRecord | None:
-        table = self.query_one("#channel-table", DataTable)
-        if table.row_count == 0:
-            return None
-        row_key = table.cursor_row
-        # Get the key of the row at cursor position
         try:
-            key = table.get_row_at(row_key)[0]  # first cell
+            table.update_cell(uid, "st", _status_text(ch.status))
+            table.update_cell(uid, "channel_name",
+                              Text(ch.display_name, style=STATUS_STYLE.get(ch.status, "")))
         except Exception:
-            return None
-        # Find by matching cursor row key
-        try:
-            uid = str(table.get_cell_at((table.cursor_row, 0)))
-        except Exception:
-            return None
-        # Use coordinate-based lookup
-        return self._channel_at_cursor()
+            # Fall back to full table refresh if cell update fails
+            self._refresh_channel_table()
 
     def _channel_at_cursor(self) -> ChannelRecord | None:
+        """Get the channel at the current cursor row using simple index lookup."""
         table = self.query_one("#channel-table", DataTable)
         if table.row_count == 0:
             return None
-        try:
-            # Row key is the channel_uid we passed as `key=` in add_row
-            row_key = table.coordinate_to_cell_key((table.cursor_row, 0)).row_key.value
-            return next((c for c in self.channels if c.channel_uid == row_key), None)
-        except Exception:
-            return None
+        visible = self._visible_channels()
+        cursor = table.cursor_row
+        if 0 <= cursor < len(visible):
+            return visible[cursor]
+        return None
 
     # ── Actions ──────────────────────────────
 
