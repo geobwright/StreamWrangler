@@ -301,13 +301,9 @@ class WrangleTUI(App):
         ch = next((c for c in self.channels if c.channel_uid == uid), None)
         if ch is None:
             return
-        try:
-            table.update_cell(uid, "st", _status_text(ch.status))
-            table.update_cell(uid, "channel_name",
-                              Text(ch.display_name, style=STATUS_STYLE.get(ch.status, "")))
-        except Exception:
-            # Fall back to full table refresh if cell update fails
-            self._refresh_channel_table()
+        table.update_cell(uid, "st", _status_text(ch.status))
+        table.update_cell(uid, "channel_name",
+                          Text(ch.display_name, style=STATUS_STYLE.get(ch.status, "")))
 
     def _channel_at_cursor(self) -> ChannelRecord | None:
         """Get the channel at the current cursor row using simple index lookup."""
@@ -328,6 +324,11 @@ class WrangleTUI(App):
         self._refresh_group_labels()
         self._update_status_bar()
         self.unsaved = True
+        # Advance cursor to next row
+        table = self.query_one("#channel-table", DataTable)
+        next_row = table.cursor_row + 1
+        if next_row < table.row_count:
+            table.move_cursor(row=next_row)
 
     def action_toggle_channel(self) -> None:
         ch = self._channel_at_cursor()
