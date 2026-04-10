@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Config with credentials
+config/config.local.yaml
+.env
+
+# Data files (generated)
+data/channels.json
+data/queue.json
+output/
+
+# Sample/provider M3U files
+00-Documents/*.m3u
+00-Documents/*.m3u8

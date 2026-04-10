@@ -1,0 +1,8 @@
+# Copy to config.local.yaml and fill in your values
+# config.local.yaml is gitignored — never committed
+
+provider:
+  url: "https://your-provider-url/?movies=false&series=false"
+
+output:
+  path: "/home/geoffrey/infra/compose/dispatcharr/data/m3us/streamwrangler.m3u"
