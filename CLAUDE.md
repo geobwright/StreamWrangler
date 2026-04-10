@@ -42,7 +42,7 @@ cli/
 tui/
   app.py          — Textual TUI for include/exclude curation
 config/
-  groups.yaml           — source group → target group mapping
+  groups.yaml           — source group → target group mapping (prefix or exact)
   normalization.yaml    — strip/replace rules for name cleaning
   config.local.yaml     — provider URL (GITIGNORED)
 data/
@@ -59,6 +59,39 @@ data/
    - Scores variants; keeps best per channel uid
    - Appends HD backup (`{uid}__bk`) for channels whose primary is 4K or FHD
 4. **Store** — `store.py` merges normalized channels into `channels.json`, preserving curation decisions
+
+## Group Filter — groups.yaml
+
+Two rule types supported:
+
+```yaml
+# Prefix match — catches all quality/tier variants automatically
+- source_group_prefix: "UK| SPORT"
+  target_group: "UK Sports"
+  enabled: true
+
+# Exact match — use where prefix would be too broad
+- source_group: "4K| ᵁᴴᴰ ³⁸⁴⁰ᴾ"
+  target_group: "UK Sports"
+  enabled: true
+```
+
+**Always prefer prefix rules** — they catch `ᴴᴰ`, `ʰᵉᵛᶜ`, `ᴿᴬᵂ`, `ⱽᴵᴾ`, `ᵁᴴᴰ` variants without separate entries. Exact match takes priority when both could match the same group.
+
+## Quality Scoring (variant deduplication)
+
+When multiple variants of the same channel exist, the highest scorer wins:
+
+| Quality | Base score |
+|---|---|
+| 4K | 40 |
+| FHD | 30 |
+| HD | 20 |
+| "" (Unk) | 15 |
+| SD | 10 |
+
+- HEVC codec hint: +3 bonus (prefer H.265 over H.264 at same resolution)
+- RAW/BACKUP/LOW in name: −15 penalty
 
 ## ChannelRecord fields (channels.json)
 
@@ -95,9 +128,19 @@ data/
 
 ## Key Design Decisions
 
-- **HEVC is a codec, not a quality tier.** A channel named "BBC One HEVC" gets `quality="HD"` (or whatever resolution the name implies), not `quality="HEVC"`. The HEVC hint is stored in `advertised_codec`.
-- **`advertised_quality` is always re-derived from the name** on ingest. It reflects current detection logic, not a historical value.
-- **Probe-verified fields are preserved across re-ingest** (`quality`, `quality_verified`, `codec`). Advertised fields are always refreshed.
+- **HEVC is a codec, not a quality tier.** A channel named "BBC One HEVC" gets `quality="HD"` (default), not `quality="HEVC"`. The HEVC hint is stored in `advertised_codec`.
+- **Unknown quality shown as `Unk`.** Channels with no quality indicator in name get `quality=""`.
+- **`advertised_quality` always re-derived on ingest.** Reflects current detection logic, not a historical value.
+- **Probe-verified fields preserved across re-ingest** (`quality`, `quality_verified`, `codec`). Advertised fields always refreshed.
 - **`channels.json` migration** in `load_store()` handles legacy records where `quality="HEVC"` was stored under the old scheme.
+- **Prefix group matching** — always use `source_group_prefix` in groups.yaml. Exact string matching caused persistent blind spots (entire quality tiers missing).
 - **Provider URL** contains credentials — stored only in `config/config.local.yaml`, gitignored.
 - **Output M3U** written to `/home/geoffrey/infra/compose/dispatcharr/data/m3us/` (separate repo).
+
+## What's Not Built Yet
+
+- `output.py` — clean M3U generator (writes final file to Dispatcharr path)
+- `wrangle output` CLI command
+- Channel numbering (`wrangle number`)
+- Claude API classifier for auto-suggest on pending channels
+- Scheduled cron refresh (2-hour interval)
