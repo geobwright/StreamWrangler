@@ -378,6 +378,24 @@ def number(
 
 
 @app.command()
+def output(
+    path: Annotated[
+        Optional[Path],
+        typer.Argument(help="Output path. Defaults to Dispatcharr M3U path."),
+    ] = None,
+):
+    """Write included, numbered channels to M3U for Dispatcharr."""
+    if not STORE_PATH.exists():
+        console.print("[red]No channels.json found.[/red] Run [bold]wrangle ingest[/bold] first.")
+        raise typer.Exit(1)
+
+    from streamwrangler.output import write_output, OUTPUT_PATH
+    out_path = path or OUTPUT_PATH
+    count = write_output(out_path)
+    console.print(f"[bold green]Wrote {count} channels → {out_path}[/bold green]")
+
+
+@app.command()
 def status():
     """Show current curation progress."""
     if not STORE_PATH.exists():

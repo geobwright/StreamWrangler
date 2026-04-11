@@ -36,28 +36,42 @@ def propose_numbering(channels: list[ChannelRecord]) -> NumberingPlan:
             "is_backup": ch.channel_uid.endswith("__bk"),
         })
 
-    prompt = f"""You are organizing a personal IPTV channel lineup for a UK viewer.
+    prompt = f"""You are organizing a personal IPTV channel lineup for a US viewer based in Kansas City, MO.
+Primary interests: US broadcast/news, UK sports (EPL, Champions League), tennis, soccer, cricket, rugby, F1.
+Secondary: UK general, France general and sports.
 
 Here are {len(channel_list)} channels that need to be assigned channel numbers:
 
 {json.dumps(channel_list, indent=2)}
 
 Your task:
-1. Group channels into logical blocks (e.g. Entertainment, Sports, News, Movies, Kids, International)
-2. Assign channel numbers with gaps to leave room for future additions
-3. Place backup channels (is_backup=true) immediately after their matching primary channel
+1. Assign channels to the blocks below — use EXACTLY these block names, start numbers, and order
+2. Assign channel numbers with gaps (~5 numbers between channels) to leave room for future additions
+3. Place backup channels (is_backup=true) immediately after their matching primary channel, numbered consecutively
 4. Use the display_name values exactly as provided — do not modify them
+5. Every channel must appear in exactly one block
 
-Numbering rules:
-- Start each block at a round number (100, 200, 300, 400, 500, etc.)
-- Leave ~5 numbers between channels within a block
-- Leave a larger gap (20-50 numbers) between natural sub-sections within a block
-- UK viewer priorities: Entertainment first (BBC, ITV, Channel 4, etc.), then Sports, News, Movies, Kids, then foreign-language channels last
-- Channels with [FR], [DE], [IT], etc. in the name are foreign language — group them in an International block at the end
-- Within Sports, group by type where possible (general sports, football, cricket, etc.)
+Required blocks in this exact order:
+  US Broadcast       start: 100   (US local/network broadcast: ABC, CBS, NBC, FOX, CW + KC market)
+  US News            start: 150   (CNN, Fox News, MSNBC, Bloomberg, etc.)
+  US Sports          start: 200   (ESPN, FS1, NFL, MLB, NHL, Golf, Tennis Channel, etc.)
+  UK Sports          start: 250   (Sky Sports, TNT Sports, Eurosport, BeIN English, Viaplay, etc.)
+  US Entertainment   start: 300   (Hallmark, Great American Family, A&E, AMC, FX, History, Discovery, etc.)
+  France             start: 350   (all French channels — TF1, France 2, Canal+, BeIN FR, L'Equipe, etc.)
+  UK General         start: 400   (BBC, ITV, Channel 4, Channel 5, Sky Atlantic, Sky News, etc.)
+  US PPV             start: 900   (US PPV events — NFL, MLB, NHL, UFC, Golf, MLS, DAZN US)
+  UK Football PPV    start: 930   (EPL team feeds, Championship, La Liga PPV, UEFA PPV, live football)
+  UK Events PPV      start: 960   (TNT Sport Events, Formula 1, DAZN UK, Rugby PPV, UFC UK)
+  Tennis PPV         start: 990   (all tennis feeds — ATP, WTA, Grand Slams, court-by-court)
+
+Rules:
+- Every channel must go into one of the blocks above — no extra blocks
+- Channels with target_group matching a block should generally go in that block
+- US PPV, UK Football PPV, UK Events PPV, Tennis PPV channels have live match names that change daily — number them sequentially with no gaps (901, 902, 903...)
+- Within non-PPV blocks, leave ~5 numbers between channels
 
 Respond with ONLY valid JSON — no markdown fences, no explanation, no trailing text:
-{{"blocks": [{{"name": "Entertainment", "start": 100, "channels": [{{"uid": "...", "number": 101, "display_name": "..."}}]}}]}}"""
+{{"blocks": [{{"name": "US Broadcast", "start": 100, "channels": [{{"uid": "...", "number": 101, "display_name": "..."}}]}}]}}"""
 
     client = anthropic.Anthropic()
     response = client.messages.create(
@@ -75,10 +89,17 @@ Respond with ONLY valid JSON — no markdown fences, no explanation, no trailing
 
     data = json.loads(raw)
 
+    # Build fallback lookup — if AI omits display_name in response, use what we sent it
+    display_name_lookup = {ch["uid"]: ch["display_name"] for ch in channel_list}
+
     blocks = []
     for b in data["blocks"]:
         block_channels = [
-            NumberedChannel(uid=ch["uid"], number=ch["number"], display_name=ch["display_name"])
+            NumberedChannel(
+                uid=ch["uid"],
+                number=ch["number"],
+                display_name=ch.get("display_name") or display_name_lookup.get(ch["uid"], ch["uid"]),
+            )
             for ch in b.get("channels", [])
         ]
         blocks.append(NumberingBlock(name=b["name"], start=b["start"], channels=block_channels))
