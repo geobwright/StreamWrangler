@@ -133,6 +133,7 @@ _UNICODE_NOISE_RE = re.compile(
     r'\u2c60-\u2c7f\ua720-\ua7ff\u24b6-\u24e9]+'
 )
 _SEPARATOR_RE = re.compile(r'^[\s#=|*\-_]+$')
+_SEPARATOR_PREFIX_RE = re.compile(r'^[#=\-_*]{2,}')
 
 
 def _strip_unicode_noise(name: str) -> str:
@@ -185,6 +186,8 @@ def make_channel_uid(display_name: str, target_group: str) -> str:
 
 def is_separator(name: str) -> bool:
     if _SEPARATOR_RE.match(name):
+        return True
+    if _SEPARATOR_PREFIX_RE.match(name):
         return True
     stripped = re.sub(r"[#=|\-_*\s]", "", name)
     return not stripped
@@ -274,11 +277,20 @@ def normalize_channels(
     # Tier 1 (high-BW): 4K, FHD — primary slot
     # Tier 2 (low-BW):  HD, SD, Unk — backup slot
     # Only created when primary is Tier 1; picks the best Tier 2 variant by score.
+    # Use probe-verified quality for the tier check if available — a stream advertised
+    # as HD but probed as FHD should still get a backup created.
     _TIER1 = {"4K", "FHD"}
     _TIER2 = {"HD", "SD", ""}
     backup: dict[str, tuple[int, NormalizedChannel]] = {}
     for uid, score, ch in candidates:
-        primary_quality = best[uid][1].quality
+        primary_ch = best[uid][1]
+        if ch is primary_ch:
+            continue  # never use the primary variant as its own backup
+        if probe_cache:
+            cached = get_cached_probe(primary_ch.url, probe_cache)
+            primary_quality = cached["quality"] if cached and cached.get("quality") else primary_ch.quality
+        else:
+            primary_quality = primary_ch.quality
         if primary_quality in _TIER1 and ch.quality in _TIER2:
             if uid not in backup or score > backup[uid][0]:
                 backup[uid] = (score, ch)

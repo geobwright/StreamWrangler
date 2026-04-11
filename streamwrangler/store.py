@@ -88,9 +88,12 @@ def build_store(
                 cached = get_cached_probe(ch.url, probe_cache)
             else:
                 cached = None
+            # PPV channels: always use the fresh name from the feed — provider
+            # updates these to reflect the current fixture/event.
+            is_ppv = "PPV" in ch.target_group
             records.append(ChannelRecord(
                 channel_uid=ch.channel_uid,
-                display_name=old.display_name,
+                display_name=ch.display_name if is_ppv else old.display_name,
                 raw_display_name=ch.raw_display_name,
                 target_group=ch.target_group,
                 source_group=ch.source_group,

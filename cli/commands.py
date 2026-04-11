@@ -169,12 +169,15 @@ def _run_pipeline(source: Path | None) -> list:
         response = httpx.get(url, timeout=60, follow_redirects=True)
         response.raise_for_status()
         channels = parse_m3u_list(response.text)
+        console.print(f"[dim]Fetched {len(channels):,} raw channels from provider.[/dim]")
     else:
         channels = parse_m3u_list(source)
+        console.print(f"[dim]Parsed {len(channels):,} raw channels from file.[/dim]")
 
     rules = load_group_rules()
     group_map = build_group_map(rules)
     filtered = filter_channels(channels, group_map)
+    console.print(f"[dim]Group filter: {len(filtered):,} channels passed → normalizing...[/dim]")
     norm_rules = load_normalization_rules()
     probe_cache = load_probe_cache()
     return normalize_channels(filtered, norm_rules, probe_cache=probe_cache)

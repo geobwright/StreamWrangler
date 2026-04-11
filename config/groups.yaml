@@ -70,6 +70,11 @@ groups:
     enabled: true
     notes: "Hallmark, Great American Family, A&E, AMC, FX, History, Discovery, NatGeo"
 
+  - source_group_prefix: "US| SLING"
+    target_group: "US Entertainment"
+    enabled: true
+    notes: "Sling-labelled channels — SLING: prefix stripped by normalization rules; allow list gates content"
+
   # ─────────────────────────────────────────────
   # US PPV / EVENTS
   # ─────────────────────────────────────────────
@@ -103,7 +108,7 @@ groups:
     notes: "Tennis and boxing"
 
   - source_group_prefix: "US| TENNIS PPV"
-    target_group: "US PPV"
+    target_group: "Tennis PPV"
     enabled: true
 
   - source_group_prefix: "US| MLS PPV"
@@ -265,10 +270,6 @@ groups:
     target_group: "_excluded"
     enabled: false
     notes: "8K feed — all RAW duplicates, not useful"
-
-  - source_group_prefix: "US| SLING"
-    target_group: "_excluded"
-    enabled: false
 
   - source_group_prefix: "US| PRIME"
     target_group: "_excluded"
