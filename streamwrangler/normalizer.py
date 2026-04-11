@@ -251,7 +251,13 @@ def normalize_channels(
         if not passes_allow_list(clean, target_group, rules.allow_lists):
             continue
 
-        uid = make_channel_uid(clean, target_group)
+        # PPV channels change names constantly — use the URL's stable channel ID
+        # as the uid so include/exclude decisions survive name changes.
+        if "PPV" in target_group:
+            from .probe_cache import extract_channel_id
+            uid = extract_channel_id(raw.url)
+        else:
+            uid = make_channel_uid(clean, target_group)
 
         candidates.append((uid, score, NormalizedChannel(
             channel_uid=uid,

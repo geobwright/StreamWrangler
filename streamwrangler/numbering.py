@@ -9,6 +9,8 @@ Workflow:
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import re
+
 import yaml
 
 from .store import ChannelRecord
@@ -147,13 +149,43 @@ def apply_numbering(plan: NumberingPlan, channels: list[ChannelRecord]) -> int:
     Apply numbering plan to channel records in place.
     Sets channel_number and display_name on matched records.
     Returns count of channels updated.
+
+    PPV blocks (block name contains "PPV") are handled specially: when no UIDs in the
+    plan match current channels (daily schedules replace all channels), falls back to
+    sequentially numbering all included channels in that target_group starting from
+    block.start. UIDs in the feed are numeric and descend in schedule order, so sorting
+    by int(uid) descending preserves the provider's schedule ordering.
     """
     uid_map = {ch.channel_uid: ch for ch in channels}
+
+    # Build target_group → included channels map for PPV fallback
+    group_channels: dict[str, list[ChannelRecord]] = {}
+    for ch in channels:
+        if ch.status == "included":
+            group_channels.setdefault(ch.target_group, []).append(ch)
+
     updated = 0
     for block in plan.blocks:
-        for entry in block.channels:
-            if entry.uid in uid_map:
-                uid_map[entry.uid].channel_number = entry.number
-                uid_map[entry.uid].display_name = entry.display_name
+        matching = [entry for entry in block.channels if entry.uid in uid_map]
+
+        if "PPV" in block.name and not matching:
+            # Stale PPV plan — schedule changed since numbering.yaml was generated.
+            # Auto-assign sequential numbers to current included channels in this group.
+            candidates = group_channels.get(block.name, [])
+            # Sort by the trailing ordinal number in the display name — the provider
+            # embeds a sequence number (e.g. ":Tennis  01") that is the canonical order.
+            # UID ordering is unreliable because streams are added in batches.
+            def _ppv_sort_key(ch: ChannelRecord) -> int:
+                m = re.search(r"(\d+)\s*$", ch.display_name)
+                return int(m.group(1)) if m else 0
+            candidates = sorted(candidates, key=_ppv_sort_key)
+            for i, ch in enumerate(candidates):
+                ch.channel_number = block.start + i
                 updated += 1
+        else:
+            for entry in block.channels:
+                if entry.uid in uid_map:
+                    uid_map[entry.uid].channel_number = entry.number
+                    uid_map[entry.uid].display_name = entry.display_name
+                    updated += 1
     return updated

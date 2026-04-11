@@ -378,6 +378,62 @@ def number(
 
 
 @app.command()
+def report(
+    group: Annotated[
+        Optional[str],
+        typer.Option("--group", "-g", help="Filter to a target group (partial match, case-insensitive)"),
+    ] = None,
+):
+    """
+    Report all included channels — normalized name, raw provider name, source group.
+    Useful for cross-referencing EPG sources.
+    Grouped by target group. Use --group to filter to one group.
+    """
+    if not STORE_PATH.exists():
+        console.print("[red]No channels.json found.[/red] Run [bold]wrangle ingest[/bold] first.")
+        raise typer.Exit(1)
+
+    from streamwrangler.probe_cache import extract_channel_id
+
+    records = load_store()
+    included = [r for r in records if r.status == "included"]
+
+    if group:
+        included = [r for r in included if group.lower() in r.target_group.lower()]
+
+    if not included:
+        console.print("[yellow]No included channels found.[/yellow]")
+        raise typer.Exit()
+
+    # Group by target_group preserving order
+    by_group: dict[str, list] = {}
+    for r in included:
+        by_group.setdefault(r.target_group, []).append(r)
+
+    total = 0
+    for target_group, channels in sorted(by_group.items()):
+        table = Table(
+            title=f"{target_group}  ({len(channels)})",
+            box=box.SIMPLE_HEAVY,
+            show_lines=False,
+            title_style="bold cyan",
+        )
+        table.add_column("Display Name",      style="white",   max_width=32)
+        table.add_column("Raw Provider Name", style="dim",    max_width=36)
+        table.add_column("Source Group",      style="yellow", max_width=28)
+        table.add_column("Channel ID",         style="dim",    max_width=12, no_wrap=True)
+
+        for ch in channels:
+            cid = "/" + extract_channel_id(ch.url)
+            table.add_row(ch.display_name, ch.raw_display_name, ch.source_group, cid)
+
+        console.print(table)
+        total += len(channels)
+
+    console.print(f"[dim]Total: {total} included channels[/dim]")
+
+
+@app.command()
 def output(
     path: Annotated[
         Optional[Path],
