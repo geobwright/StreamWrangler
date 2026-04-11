@@ -397,15 +397,53 @@ def output(
 
 @app.command()
 def status():
-    """Show current curation progress."""
+    """Show current curation progress and pipeline timestamps."""
     if not STORE_PATH.exists():
         console.print("[red]No channels.json found.[/red] Run [bold]wrangle ingest[/bold] first.")
         raise typer.Exit(1)
 
+    import datetime
+    from streamwrangler.output import OUTPUT_PATH
+    from streamwrangler.probe_cache import CACHE_PATH
+
+    def _age(path: Path) -> str:
+        if not path.exists():
+            return "[dim]not found[/dim]"
+        mtime = datetime.datetime.fromtimestamp(path.stat().st_mtime)
+        age = datetime.datetime.now() - mtime
+        total_seconds = int(age.total_seconds())
+        if total_seconds < 60:
+            return f"[green]{total_seconds}s ago[/green]  ({mtime.strftime('%Y-%m-%d %H:%M')})"
+        elif total_seconds < 3600:
+            return f"[green]{total_seconds // 60}m ago[/green]  ({mtime.strftime('%Y-%m-%d %H:%M')})"
+        elif total_seconds < 86400:
+            hours = total_seconds // 3600
+            return f"[yellow]{hours}h ago[/yellow]  ({mtime.strftime('%Y-%m-%d %H:%M')})"
+        else:
+            days = total_seconds // 86400
+            return f"[red]{days}d ago[/red]  ({mtime.strftime('%Y-%m-%d %H:%M')})"
+
+    console.print()
+
+    # Pipeline timestamps
+    ts_table = Table(box=box.SIMPLE_HEAVY, show_header=False)
+    ts_table.add_column("Label", style="cyan", width=18)
+    ts_table.add_column("Value")
+    ts_table.add_row("Last ingest",  _age(STORE_PATH))
+    ts_table.add_row("Last output",  _age(OUTPUT_PATH))
+    ts_table.add_row("Probe cache",  _age(CACHE_PATH))
+    console.print(ts_table)
+
+    # Probe cache size
+    if CACHE_PATH.exists():
+        import json as _json
+        probe_count = len(_json.loads(CACHE_PATH.read_text()))
+        console.print(f"  [dim]Probe cache: {probe_count:,} entries[/dim]\n")
+
     records = load_store()
     s = store_summary(records)
 
-    console.print(f"\n[bold]Curation status[/bold]\n")
+    # Curation summary
     console.print(f"  Total:    {s['total']}")
     console.print(f"  [green]Included: {s['included']}[/green]")
     console.print(f"  [red]Excluded: {s['excluded']}[/red]")
