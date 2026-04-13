@@ -115,6 +115,26 @@ def _fill(tv: Element, cid: str, start: datetime, end: datetime,
         t = t2
 
 
+def _countdown(t: datetime, ev_start: datetime) -> str:
+    """Human-readable time remaining from t until ev_start."""
+    total_min = int((ev_start - t).total_seconds() / 60)
+    if total_min >= 60:
+        return f"{total_min // 60}h to start"
+    return f"{total_min}m to start"
+
+
+def _fill_countdown(tv: Element, cid: str, start: datetime, end: datetime,
+                    ev_start: datetime, event_label: str) -> None:
+    """Tile pre-event range with per-block countdown titles."""
+    t = start
+    while t < end:
+        t2 = min(t + timedelta(hours=BLOCK_HOURS), end)
+        countdown = _countdown(t, ev_start)
+        title = f"{countdown} — {event_label}"
+        _add_prog(tv, cid, t, t2, title, title)
+        t = t2
+
+
 def build_tennis_epg(channels: list[ChannelRecord]) -> str:
     """Build XMLTV XML string for all Tennis PPV channels."""
     now = datetime.now(timezone.utc)
@@ -158,21 +178,21 @@ def build_tennis_epg(channels: list[ChannelRecord]) -> str:
             time_label = local_t.strftime("%I:%M%p")   # "08:00AM"
             date_label = ev_start.strftime("%b %-d %Y")
 
-            pre_title = f"Next Event: {players} - {tourn}"
+            event_label = f"{players} · {tourn}"
             live_title = f"\u1d4f\u1d49\u02b7{tourn} | {players}"   # ᴺᵉʷTournament | Players
             live_desc = f"{players} at {time_label} on {date_label}"
             post_title = "Signing Off"
 
             if ev_start >= win_end:
-                # Event entirely beyond coverage window
-                _fill(tv, cid, win_start, win_end, pre_title, pre_title)
+                # Event entirely beyond coverage window — full countdown
+                _fill_countdown(tv, cid, win_start, win_end, ev_start, event_label)
             elif ev_end <= win_start:
                 # Event already over before coverage window
                 _fill(tv, cid, win_start, win_end, post_title, post_title)
             else:
-                # Pre-event phase
+                # Pre-event phase with countdown
                 if ev_start > win_start:
-                    _fill(tv, cid, win_start, ev_start, pre_title, pre_title)
+                    _fill_countdown(tv, cid, win_start, ev_start, ev_start, event_label)
                 # Live block (clipped to window if partially outside)
                 live_s = max(ev_start, win_start)
                 live_e = min(ev_end, win_end)
