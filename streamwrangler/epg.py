@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 from .store import ChannelRecord, load_store
 
-EPG_PATH = Path("/home/geoffrey/infra/compose/dispatcharr/data/epgs/streamwrangler_ppv.xml")
+EPG_PATH = Path("/home/geoffrey/infra/compose/dispatcharr/data/epgs/wrangle_tennis.xml")
 
 # Provider encodes times in Europe/Paris (CEST = UTC+2 in summer, CET = UTC+1 in winter)
 SOURCE_TZ = ZoneInfo("Europe/Paris")
