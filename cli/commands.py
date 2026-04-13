@@ -449,6 +449,8 @@ def epg(
     out_path = path or EPG_PATH
     count = write_epg(out_path)
     console.print(f"[bold green]EPG written:[/bold green] {out_path}  ({count} Tennis PPV channels)")
+    if out_path == EPG_PATH:
+        console.print(f"  [dim]→ http://docker.tail34654.ts.net:8765/{out_path.name}[/dim]")
 
 
 @app.command()
@@ -478,6 +480,7 @@ def status():
 
     import datetime
     from streamwrangler.output import OUTPUT_PATH
+    from streamwrangler.epg import EPG_PATH
     from streamwrangler.probe_cache import CACHE_PATH
 
     def _age(path: Path) -> str:
@@ -505,6 +508,7 @@ def status():
     ts_table.add_column("Value")
     ts_table.add_row("Last ingest",  _age(STORE_PATH))
     ts_table.add_row("Last output",  _age(OUTPUT_PATH))
+    ts_table.add_row("Last EPG",     _age(EPG_PATH))
     ts_table.add_row("Probe cache",  _age(CACHE_PATH))
     console.print(ts_table)
 
@@ -540,3 +544,6 @@ def status():
             str(stats["pending"]),
         )
     console.print(table)
+
+    if EPG_PATH.exists():
+        console.print(f"\n  [dim]EPG: http://docker.tail34654.ts.net:8765/{EPG_PATH.name}[/dim]")
