@@ -9,6 +9,7 @@ Output path: /home/geoffrey/infra/compose/dispatcharr/data/m3us/streamwrangler.m
 
 from pathlib import Path
 
+from .epg import _slot
 from .store import ChannelRecord, load_store
 
 OUTPUT_PATH = Path("/home/geoffrey/infra/compose/dispatcharr/data/m3us/streamwrangler.m3u")
@@ -24,7 +25,12 @@ def build_m3u(channels: list[ChannelRecord]) -> str:
     )
 
     for ch in eligible:
-        attrs = f'tvg-id="{ch.tvg_id}"'
+        if ch.target_group == "Tennis PPV":
+            s = _slot(ch.raw_display_name)
+            tvg_id = f"WrangleTennis{s:02d}" if s else ch.tvg_id
+        else:
+            tvg_id = ch.tvg_id
+        attrs = f'tvg-id="{tvg_id}"'
         if ch.tvg_logo:
             attrs += f' tvg-logo="{ch.tvg_logo}"'
         attrs += f' tvg-chno="{ch.channel_number}"'

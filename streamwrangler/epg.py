@@ -133,8 +133,9 @@ def build_tennis_epg(channels: list[ChannelRecord]) -> str:
     # --- Channel declarations ---
     for ch in tennis:
         s = _slot(ch.raw_display_name)
+        cid = f"WrangleTennis{s:02d}" if s else ch.tvg_id
         dname = f"Tennis  {s:02d}" if s else ch.display_name
-        chan = SubElement(tv, "channel", id=ch.tvg_id)
+        chan = SubElement(tv, "channel", id=cid)
         SubElement(chan, "display-name").text = dname
         if ch.tvg_logo:
             SubElement(chan, "icon", src=ch.tvg_logo)
@@ -142,7 +143,8 @@ def build_tennis_epg(channels: list[ChannelRecord]) -> str:
     # --- Programme entries ---
     for ch in tennis:
         raw = ch.raw_display_name or ""
-        cid = ch.tvg_id
+        s = _slot(raw)
+        cid = f"WrangleTennis{s:02d}" if s else ch.tvg_id
         ev = parse_tennis_name(raw, year)
 
         if ev:
