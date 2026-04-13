@@ -477,26 +477,31 @@ def status():
         raise typer.Exit(1)
 
     import datetime
+    from zoneinfo import ZoneInfo
     from streamwrangler.output import OUTPUT_PATH
     from streamwrangler.epg import EPG_PATH
     from streamwrangler.probe_cache import CACHE_PATH
 
+    _LOCAL_TZ = ZoneInfo("America/Chicago")
+
     def _age(path: Path) -> str:
         if not path.exists():
             return "[dim]not found[/dim]"
-        mtime = datetime.datetime.fromtimestamp(path.stat().st_mtime)
-        age = datetime.datetime.now() - mtime
+        mtime_utc = datetime.datetime.fromtimestamp(path.stat().st_mtime, tz=datetime.timezone.utc)
+        mtime_local = mtime_utc.astimezone(_LOCAL_TZ)
+        age = datetime.datetime.now(datetime.timezone.utc) - mtime_utc
         total_seconds = int(age.total_seconds())
+        label = mtime_local.strftime("%Y-%m-%d %I:%M %p")
         if total_seconds < 60:
-            return f"[green]{total_seconds}s ago[/green]  ({mtime.strftime('%Y-%m-%d %H:%M')})"
+            return f"[green]{total_seconds}s ago[/green]  ({label})"
         elif total_seconds < 3600:
-            return f"[green]{total_seconds // 60}m ago[/green]  ({mtime.strftime('%Y-%m-%d %H:%M')})"
+            return f"[green]{total_seconds // 60}m ago[/green]  ({label})"
         elif total_seconds < 86400:
             hours = total_seconds // 3600
-            return f"[yellow]{hours}h ago[/yellow]  ({mtime.strftime('%Y-%m-%d %H:%M')})"
+            return f"[yellow]{hours}h ago[/yellow]  ({label})"
         else:
             days = total_seconds // 86400
-            return f"[red]{days}d ago[/red]  ({mtime.strftime('%Y-%m-%d %H:%M')})"
+            return f"[red]{days}d ago[/red]  ({label})"
 
     console.print()
 
