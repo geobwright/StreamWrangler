@@ -434,6 +434,24 @@ def report(
 
 
 @app.command()
+def epg(
+    path: Annotated[
+        Optional[Path],
+        typer.Argument(help="Output path. Defaults to Dispatcharr EPG path."),
+    ] = None,
+):
+    """Generate XMLTV EPG from PPV channel schedule names."""
+    if not STORE_PATH.exists():
+        console.print("[red]No channels.json found.[/red] Run [bold]wrangle ingest[/bold] first.")
+        raise typer.Exit(1)
+
+    from streamwrangler.epg import write_epg, EPG_PATH
+    out_path = path or EPG_PATH
+    count = write_epg(out_path)
+    console.print(f"[bold green]EPG written:[/bold green] {out_path}  ({count} Tennis PPV channels)")
+
+
+@app.command()
 def output(
     path: Annotated[
         Optional[Path],

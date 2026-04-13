@@ -27,6 +27,9 @@ wrangle number                  # generate AI proposal (if no numbering.yaml) th
 wrangle number --generate       # force-regenerate AI proposal, overwrite numbering.yaml
 wrangle number --apply          # apply numbering.yaml to channels.json headlessly
 
+# Generate EPG from PPV channel names
+wrangle epg                     # build XMLTV EPG → Dispatcharr epgs/
+
 # Inspect feed without ingesting
 wrangle analyze                 # group/channel counts from provider URL
 wrangle filter-report           # what passes the group filter
@@ -284,8 +287,6 @@ Applied in `filter_channels()` before any downstream processing:
 
 ## What's Not Built Yet
 
-- `output.py` — clean M3U generator (writes final file to Dispatcharr path)
-- `wrangle output` CLI command
-- `wrangle status` dashboard improvements (last ingest date, probe cache stats, next-step suggestions)
+- `wrangle status` dashboard improvements
 - Claude API classifier for auto-suggest on pending channels
-- Scheduled cron refresh (2-hour interval)
+- EPG support for other PPV groups (UK Football PPV, UK Events PPV, US PPV)
