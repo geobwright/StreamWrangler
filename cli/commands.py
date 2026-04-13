@@ -440,15 +440,22 @@ def epg(
         typer.Argument(help="Output path. Defaults to Dispatcharr EPG path."),
     ] = None,
 ):
-    """Generate XMLTV EPG from PPV channel schedule names."""
+    """Generate XMLTV EPG — Tennis PPV from channel names, sports teams from TheSportsDB."""
     if not STORE_PATH.exists():
         console.print("[red]No channels.json found.[/red] Run [bold]wrangle ingest[/bold] first.")
         raise typer.Exit(1)
 
-    from streamwrangler.epg import write_epg, EPG_PATH
-    out_path = path or EPG_PATH
-    count = write_epg(out_path)
-    console.print(f"[bold green]EPG written:[/bold green] {out_path}  ({count} Tennis PPV channels)")
+    from streamwrangler.epg import write_epg, EPG_PATH, write_sports_epg, SPORTS_EPG_PATH
+
+    tennis_path = path or EPG_PATH
+    tennis_count = write_epg(tennis_path)
+    console.print(f"[bold green]Tennis EPG:[/bold green] {tennis_path}  ({tennis_count} channels)")
+
+    sports_count = write_sports_epg(SPORTS_EPG_PATH)
+    if sports_count:
+        console.print(f"[bold green]Sports EPG:[/bold green] {SPORTS_EPG_PATH}  ({sports_count} teams)")
+    else:
+        console.print("[dim]Sports EPG: no config/sportsdb.yaml found — skipped[/dim]")
 
 
 @app.command()
@@ -479,7 +486,7 @@ def status():
     import datetime
     from zoneinfo import ZoneInfo
     from streamwrangler.output import OUTPUT_PATH
-    from streamwrangler.epg import EPG_PATH
+    from streamwrangler.epg import EPG_PATH, SPORTS_EPG_PATH
     from streamwrangler.probe_cache import CACHE_PATH
 
     _LOCAL_TZ = ZoneInfo("America/Chicago")
@@ -507,12 +514,13 @@ def status():
 
     # Pipeline timestamps
     ts_table = Table(box=box.SIMPLE_HEAVY, show_header=False)
-    ts_table.add_column("Label", style="cyan", width=18)
+    ts_table.add_column("Label", style="cyan", width=20)
     ts_table.add_column("Value")
-    ts_table.add_row("Last ingest",  _age(STORE_PATH))
-    ts_table.add_row("Last output",  _age(OUTPUT_PATH))
-    ts_table.add_row("Last EPG",     _age(EPG_PATH))
-    ts_table.add_row("Probe cache",  _age(CACHE_PATH))
+    ts_table.add_row("Last ingest",    _age(STORE_PATH))
+    ts_table.add_row("Last output",    _age(OUTPUT_PATH))
+    ts_table.add_row("Tennis EPG",     _age(EPG_PATH))
+    ts_table.add_row("Sports EPG",     _age(SPORTS_EPG_PATH))
+    ts_table.add_row("Probe cache",    _age(CACHE_PATH))
     console.print(ts_table)
 
     # Probe cache size

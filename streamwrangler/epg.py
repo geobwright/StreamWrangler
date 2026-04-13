@@ -216,3 +216,143 @@ def write_epg(path: Path = EPG_PATH) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return sum(1 for c in channels if c.target_group == "Tennis PPV")
+
+
+SPORTS_EPG_PATH = Path("/home/geoffrey/infra/compose/dispatcharr/data/epgs/wrangle_sports.xml")
+
+
+def build_sportsdb_epg(config: dict) -> str:
+    """Build XMLTV XML string for all SportsDB team channels."""
+    from .sportsdb import (
+        channel_epg_map, fetch_next_events, fetch_venue, fetch_league_table,
+        venue_display_tz, event_utc, team_standing, soccer_season,
+    )
+
+    api_key = config.get("api_key", "123")
+    teams = config.get("teams") or []
+
+    now = datetime.now(timezone.utc)
+    year = now.year
+    month = now.month
+    win_start = _floor_block(now)
+    win_end = win_start + timedelta(hours=WINDOW_HOURS)
+
+    venue_cache: dict = {}
+    table_cache: dict = {}
+
+    tv = Element("tv")
+    tv.set("source-info-name", "StreamWrangler EPG")
+
+    # Channel declarations
+    for team in teams:
+        cid = team["epg_id"]
+        chan = SubElement(tv, "channel", id=cid)
+        SubElement(chan, "display-name").text = team["name"]
+
+    # Programme entries
+    for team in teams:
+        cid = team["epg_id"]
+        team_id = str(team["team_id"])
+        team_name = team["name"]
+        sport = team.get("sport", "soccer")
+        league_id = str(team.get("league_id") or "")
+
+        try:
+            events = fetch_next_events(team_id, api_key)
+        except Exception:
+            events = []
+
+        # Find the most relevant event: in-progress or the next upcoming one
+        next_event = None
+        for ev in events:
+            ev_utc_dt = event_utc(ev)
+            # Include events that started within the last MATCH_HOURS (may be in progress)
+            if ev_utc_dt >= now - timedelta(hours=MATCH_HOURS):
+                next_event = ev
+                break
+
+        if not next_event:
+            _fill(tv, cid, win_start, win_end, "No Match Scheduled", "No Match Scheduled")
+            continue
+
+        ev_start = event_utc(next_event)
+        ev_end = ev_start + timedelta(hours=MATCH_HOURS)
+
+        home = (next_event.get("strHomeTeam") or "").strip()
+        away = (next_event.get("strAwayTeam") or "").strip()
+        league = (next_event.get("strLeague") or "").strip()
+
+        match_label = f"{home} vs {away}"
+        event_label = f"{home} vs {away} · {league}"
+
+        # Venue for display timezone
+        venue_id = str(next_event.get("idVenue") or "").strip()
+        venue = None
+        if venue_id and venue_id != "0":
+            try:
+                venue = fetch_venue(venue_id, api_key, venue_cache)
+            except Exception:
+                pass
+        display_tz = venue_display_tz(venue)
+        venue_name = (venue.get("strVenue") or "").strip() if venue else ""
+
+        # Local kickoff time for description
+        local_t = ev_start.astimezone(display_tz)
+        time_label = local_t.strftime("%-I:%M %p")    # "8:00 PM"
+        tz_abbr = local_t.strftime("%Z")               # "BST", "CEST", …
+        date_label = ev_start.strftime("%b %-d %Y")
+
+        # League standing for PL / La Liga descriptions
+        standing_str = ""
+        if sport == "soccer" and league_id:
+            season = soccer_season(year, month)
+            try:
+                table = fetch_league_table(league_id, season, api_key, table_cache)
+                pos = team_standing(table, team_name)
+                if pos:
+                    standing_str = f" · {pos}"
+            except Exception:
+                pass
+
+        # Build description line
+        if venue_name:
+            desc = f"{match_label} · {time_label} {tz_abbr} at {venue_name}{standing_str}"
+        else:
+            desc = f"{match_label} · {time_label} {tz_abbr} on {date_label}{standing_str}"
+
+        live_title = f"\u1d4f\u1d49\u02b7{league} | {match_label}"
+        post_title = f"Event Has Ended \u00b7 {match_label}"
+
+        if ev_start >= win_end:
+            # Event entirely beyond coverage window — full countdown
+            _fill_countdown(tv, cid, win_start, win_end, ev_start, event_label)
+        elif ev_end <= win_start:
+            # Event already over before coverage window
+            _fill(tv, cid, win_start, win_end, post_title, post_title)
+        else:
+            # Pre-event countdown
+            if ev_start > win_start:
+                _fill_countdown(tv, cid, win_start, ev_start, ev_start, event_label)
+            # Live block (clipped to window)
+            live_s = max(ev_start, win_start)
+            live_e = min(ev_end, win_end)
+            _add_prog(tv, cid, live_s, live_e, live_title, desc, live=True)
+            # Post-event
+            if ev_end < win_end:
+                _fill(tv, cid, ev_end, win_end, post_title, post_title)
+
+    xml_indent(tv, space="  ")
+    body = tostring(tv, encoding="unicode")
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + body
+
+
+def write_sports_epg(path: Path = SPORTS_EPG_PATH) -> int:
+    """Fetch SportsDB events and write sports EPG. Returns team count (0 if no config)."""
+    from .sportsdb import load_sportsdb_config
+    config = load_sportsdb_config()
+    if not config:
+        return 0
+    content = build_sportsdb_epg(config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return len(config.get("teams") or [])

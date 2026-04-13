@@ -15,6 +15,16 @@ from .store import ChannelRecord, load_store
 OUTPUT_PATH = Path("/home/geoffrey/infra/compose/dispatcharr/data/m3us/streamwrangler.m3u")
 
 
+def _sports_epg_map() -> dict[str, str]:
+    """Return {channel_uid: epg_id} from sportsdb.yaml, or empty dict if not configured."""
+    try:
+        from .sportsdb import load_sportsdb_config, channel_epg_map
+        config = load_sportsdb_config()
+        return channel_epg_map(config) if config else {}
+    except Exception:
+        return {}
+
+
 def build_m3u(channels: list[ChannelRecord]) -> str:
     """Build M3U content from a list of channel records."""
     lines = ["#EXTM3U"]
@@ -24,10 +34,14 @@ def build_m3u(channels: list[ChannelRecord]) -> str:
         key=lambda c: c.channel_number,
     )
 
+    sports_map = _sports_epg_map()
+
     for ch in eligible:
         if ch.target_group == "Tennis PPV":
             s = _slot(ch.raw_display_name)
             tvg_id = f"WrangleTennis{s:02d}" if s else ch.tvg_id
+        elif ch.channel_uid in sports_map:
+            tvg_id = sports_map[ch.channel_uid]
         else:
             tvg_id = ch.tvg_id
         attrs = f'tvg-id="{tvg_id}"'

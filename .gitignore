@@ -12,6 +12,7 @@ config/config.local.yaml
 
 # Personal lineup decisions — not shared
 config/numbering.yaml
+config/sportsdb.yaml
 data/probe_cache.json
 
 # Data files (generated)
