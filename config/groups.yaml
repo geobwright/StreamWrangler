@@ -115,6 +115,10 @@ groups:
     target_group: "US PPV"
     enabled: true
 
+  - source_group_prefix: "US| PARAMOUNT+"
+    target_group: "Paramount+ PPV"
+    enabled: true
+
   - source_group_prefix: "US| UFC PPV"
     target_group: "US PPV"
     enabled: false

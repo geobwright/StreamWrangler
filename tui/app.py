@@ -16,6 +16,7 @@ Keybindings:
   /                 Search/filter channels by name
   Escape            Clear search
   s                 Save to channels.json
+  o                 Save, write M3U output, and exit
   q                 Quit (auto-saves)
 """
 
@@ -288,11 +289,12 @@ class WrangleTUI(App):
         Binding("shift+x",   "exclude_all_group",  "Excl. all",     show=True),
         Binding("e",         "edit_name",          "Edit name",     show=True),
         Binding("p",         "probe_channel",       "Probe",         show=True),
-        Binding("n",         "toggle_sort",         "Sort A-Z",      show=True),
-        Binding("u",         "show_url",           "Show URL",      show=True),
+        Binding("n",         "toggle_sort",         "Sort A-Z",      show=False),
+        Binding("u",         "show_url",           "Show URL",      show=False),
         Binding("/",         "start_search",       "Search",        show=True),
         Binding("escape",    "clear_search",       "Clear",         show=False),
         Binding("s",         "save",               "Save",          show=True),
+        Binding("o",         "save_and_output",    "Save & Output", show=True),
         Binding("q",         "quit_app",           "Quit",          show=True),
     ]
 
@@ -607,6 +609,28 @@ class WrangleTUI(App):
         self.unsaved = False
         self._update_status_bar()
         self.notify("Saved", severity="information", timeout=2)
+
+    def action_save_and_output(self) -> None:
+        """Save channels.json, write M3U output, then exit."""
+        from streamwrangler.output import write_output
+        save_store(self.channels, self.store_path)
+        self.unsaved = False
+        count = write_output()
+        unnumbered = sum(
+            1 for c in self.channels
+            if c.status == "included" and c.channel_number is None
+        )
+        if unnumbered:
+            self.notify(
+                f"Saved · {count} channels written to M3U"
+                f" — {unnumbered} included channel(s) skipped (no number yet,"
+                f" run wrangle number)",
+                severity="warning", timeout=6,
+            )
+        else:
+            self.notify(f"Saved · {count} channels written to M3U — exiting",
+                        severity="information", timeout=2)
+        self.set_timer(6 if unnumbered else 2, self.exit)
 
     def action_quit_app(self) -> None:
         if self.unsaved:

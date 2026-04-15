@@ -180,7 +180,7 @@ class NumberTUI(App):
         Binding("shift+j",   "move_down",          "Move ↓",        show=True),
         Binding("shift+k",   "move_up",            "Move ↑",        show=True),
         Binding("e",         "edit_name",          "Edit name",     show=True),
-        Binding("hash",      "edit_number",        "Edit #",        show=True),
+        Binding("n",         "edit_number",        "Edit #",        show=True),
         Binding("m",         "move_block",         "Move block",    show=True),
         Binding("s",         "save",               "Save",          show=True),
         Binding("a",         "apply",              "Apply",         show=True),

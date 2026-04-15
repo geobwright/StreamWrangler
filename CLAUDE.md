@@ -216,6 +216,7 @@ France Sports Eurosport 1 are ranked independently (different languages/feeds).
 | / | Search/filter |
 | Escape | Clear search |
 | s | Save |
+| o | Save, write M3U output, and exit |
 | q | Quit (auto-saves) |
 
 ## TUI Qual Column Behaviour (curate)
@@ -271,7 +272,7 @@ blocks:
 | Tab / Shift+Tab | Switch focus block list ↔ channel table |
 | Shift+J / Shift+K | Move channel down / up within block |
 | e | Edit display name |
-| # | Edit channel number |
+| n | Edit channel number |
 | m | Move channel to a different block |
 | s | Save numbering.yaml |
 | a | Apply to channels.json (writes numbers + display names) |

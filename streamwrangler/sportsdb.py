@@ -9,6 +9,8 @@ descriptions (e.g. "8:00 PM BST" at Anfield, "9:00 PM CEST" in Madrid).
 """
 
 import re
+import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -59,10 +61,44 @@ def channel_epg_map(config: dict) -> dict[str, str]:
     return {str(t["channel_uid"]): t["epg_id"] for t in (config.get("teams") or [])}
 
 
+# Rate limiter — free tier allows 30 requests/minute.
+# Tracks timestamps of recent calls in a sliding window and sleeps if needed.
+_RATE_LIMIT = 25          # stay comfortably under the 30/min ceiling
+_RATE_WINDOW = 60.0       # seconds
+_call_times: deque = deque()
+
+
 def _get(url: str) -> dict:
+    now = time.monotonic()
+
+    # Drop timestamps outside the sliding window
+    while _call_times and now - _call_times[0] > _RATE_WINDOW:
+        _call_times.popleft()
+
+    if len(_call_times) >= _RATE_LIMIT:
+        sleep_for = _RATE_WINDOW - (now - _call_times[0]) + 0.1
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+
+    _call_times.append(time.monotonic())
     response = httpx.get(url, timeout=15, follow_redirects=True)
     response.raise_for_status()
     return response.json()
+
+
+def fetch_team_by_name(team_name: str, api_key: str, cache: dict) -> dict | None:
+    """Search for a team by name. Returns the first result or None. Cached by lowercased name."""
+    key = team_name.lower().strip()
+    if key in cache:
+        return cache[key]
+    try:
+        data = _get(f"{BASE_URL}/{api_key}/searchteams.php?t={team_name}")
+        teams = data.get("teams") or []
+        result = teams[0] if teams else None
+    except Exception:
+        result = None
+    cache[key] = result
+    return result
 
 
 def fetch_next_events(team_id: str, api_key: str) -> list[dict]:

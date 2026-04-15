@@ -68,6 +68,7 @@ strip_suffixes:
   - " (S)"
   - " (PC)"
   - " (F2)"
+  - " & ³⁸⁴⁰ᴾ"
 
 # ─────────────────────────────────────────────
 # 3. INLINE NOISE TO REMOVE
@@ -263,6 +264,7 @@ allow_lists:
     - "TNT SPORTS 2"
     - "TNT SPORTS 3"
     - "TNT SPORTS 4"
+    - "TNT SPORTS ULTIMATE"
     - "BEIN SPORTS 1"
     - "BEIN SPORTS 2"
     - "EUROSPORT 1"

@@ -14,7 +14,7 @@ from streamwrangler.filter import load_group_rules, build_group_map, filter_chan
 from streamwrangler.normalizer import load_normalization_rules, normalize_channels
 from streamwrangler.store import load_store, save_store, build_store, store_summary, STORE_PATH
 from streamwrangler.probe_cache import load_probe_cache, CACHE_PATH
-from streamwrangler.numbering import load_numbering, save_numbering, apply_numbering, NUMBERING_PATH
+from streamwrangler.numbering import load_numbering, save_numbering, apply_numbering, merge_new_channels, fix_block_starts, NUMBERING_PATH
 
 app = typer.Typer(
     name="wrangle",
@@ -349,6 +349,19 @@ def number(
                 f"{sum(len(b.channels) for b in plan.blocks)} channels across "
                 f"{len(plan.blocks)} blocks.[/dim]"
             )
+            fixed_blocks = fix_block_starts(plan)
+            if fixed_blocks:
+                console.print(
+                    f"[yellow]Renumbered block(s) to correct start positions: {', '.join(fixed_blocks)}[/yellow]"
+                )
+            new_count = merge_new_channels(plan, channels)
+            if new_count:
+                console.print(
+                    f"[yellow]{new_count} new channel(s) added to plan (placed at end of their block) "
+                    f"— reposition in TUI if needed.[/yellow]"
+                )
+            if fixed_blocks or new_count:
+                save_numbering(plan)
 
     if plan is None:
         console.print(
@@ -445,17 +458,115 @@ def epg(
         console.print("[red]No channels.json found.[/red] Run [bold]wrangle ingest[/bold] first.")
         raise typer.Exit(1)
 
-    from streamwrangler.epg import write_epg, EPG_PATH, write_sports_epg, SPORTS_EPG_PATH
+    from streamwrangler.epg import (
+        write_epg, EPG_PATH,
+        write_sports_epg, SPORTS_EPG_PATH,
+        write_paramount_epg, PARAMOUNT_EPG_PATH,
+        write_logos_epg, LOGOS_EPG_PATH,
+    )
 
-    tennis_path = path or EPG_PATH
-    tennis_count = write_epg(tennis_path)
-    console.print(f"[bold green]Tennis EPG:[/bold green] {tennis_path}  ({tennis_count} channels)")
-
+    # Sports EPG first — fetch live match data before any tennis ranking API calls
+    # that might exhaust the free-tier rate limit.
     sports_count = write_sports_epg(SPORTS_EPG_PATH)
     if sports_count:
         console.print(f"[bold green]Sports EPG:[/bold green] {SPORTS_EPG_PATH}  ({sports_count} teams)")
     else:
         console.print("[dim]Sports EPG: no config/sportsdb.yaml found — skipped[/dim]")
+
+    tennis_path = path or EPG_PATH
+    tennis_count = write_epg(tennis_path)
+    console.print(f"[bold green]Tennis EPG:[/bold green] {tennis_path}  ({tennis_count} channels)")
+
+    paramount_count = write_paramount_epg(PARAMOUNT_EPG_PATH)
+    if paramount_count:
+        console.print(f"[bold green]Paramount+ EPG:[/bold green] {PARAMOUNT_EPG_PATH}  ({paramount_count} channels)")
+    else:
+        console.print("[dim]Paramount+ EPG: no included Paramount+ PPV channels — skipped[/dim]")
+
+    logos_count = write_logos_epg(LOGOS_EPG_PATH)
+    console.print(f"[bold green]Logos EPG:[/bold green]     {LOGOS_EPG_PATH}  ({logos_count} channels)")
+
+
+@app.command()
+def logos(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Match only — do not download or update channels.json")] = False,
+    overwrite: Annotated[bool, typer.Option("--overwrite", help="Re-download logos even if file already exists")] = False,
+    push: Annotated[bool, typer.Option("--push", help="Push local logos to Dispatcharr via its REST API")] = False,
+    dispatcharr_url: Annotated[str, typer.Option("--dispatcharr-url", help="Dispatcharr base URL")] = "http://10.0.1.39:9191",
+    dispatcharr_user: Annotated[str, typer.Option("--dispatcharr-user", help="Dispatcharr username")] = "admin",
+    dispatcharr_pass: Annotated[str, typer.Option("--dispatcharr-pass", help="Dispatcharr password")] = "admin",
+):
+    """
+    Download channel logos from tv-logo/tv-logos and update channels.json.
+
+    Matches included channels to the tv-logo repo by normalizing display names.
+    Logos are resized/padded to 512×512 transparent PNG and served via Caddy.
+    Prints a summary of matches and an unmatched list for manual review.
+
+    Use --push to also update Dispatcharr via its REST API so every channel
+    immediately shows the correct logo without manual configuration.
+    """
+    if not STORE_PATH.exists():
+        console.print("[red]No channels.json found.[/red] Run [bold]wrangle ingest[/bold] first.")
+        raise typer.Exit(1)
+
+    if push:
+        from streamwrangler.logos import push_logos
+        console.print("[dim]Connecting to Dispatcharr and pushing logos...[/dim]")
+        updated, already_ok, skipped = push_logos(
+            base_url=dispatcharr_url,
+            username=dispatcharr_user,
+            password=dispatcharr_pass,
+            dry_run=dry_run,
+        )
+        console.print(
+            f"\n[bold green]Updated:[/bold green]    {len(updated)}\n"
+            f"[bold cyan]Already OK:[/bold cyan]  {len(already_ok)}\n"
+            f"[bold yellow]Skipped:[/bold yellow]    {len(skipped)}\n"
+        )
+        if updated:
+            table = Table(title="Logo Updated in Dispatcharr", box=box.SIMPLE_HEAVY)
+            table.add_column("Channel", style="green", max_width=55)
+            for label in sorted(updated):
+                table.add_row(label)
+            console.print(table)
+        if skipped:
+            table = Table(title="Skipped — no Dispatcharr match or no local logo", box=box.SIMPLE_HEAVY)
+            table.add_column("Channel", style="yellow", max_width=65)
+            for label in sorted(skipped):
+                table.add_row(label)
+            console.print(table)
+        return
+
+    from streamwrangler.logos import run_logos
+
+    console.print("[dim]Fetching logo index from tv-logo/tv-logos...[/dim]")
+    matched, unmatched = run_logos(dry_run=dry_run, overwrite=overwrite)
+
+    console.print(
+        f"\n[bold green]Matched:[/bold green]   {len(matched)}\n"
+        f"[bold yellow]Unmatched:[/bold yellow] {len(unmatched)}\n"
+    )
+
+    if matched:
+        table = Table(title="Matched Logos", box=box.SIMPLE_HEAVY)
+        table.add_column("Channel",  style="white",  max_width=36)
+        table.add_column("File",     style="cyan",   max_width=32)
+        table.add_column("Group",    style="dim",    max_width=24)
+        for ch, filename in matched:
+            table.add_row(ch.display_name, filename, ch.target_group)
+        console.print(table)
+
+    if unmatched:
+        table = Table(title="Unmatched — no logo found", box=box.SIMPLE_HEAVY)
+        table.add_column("Channel",  style="yellow", max_width=36)
+        table.add_column("Group",    style="dim",    max_width=24)
+        for ch in unmatched:
+            table.add_row(ch.display_name, ch.target_group)
+        console.print(table)
+
+    if not dry_run and matched:
+        console.print(f"[dim]channels.json updated — run [bold]wrangle output[/bold] to regenerate M3U.[/dim]")
 
 
 @app.command()
@@ -486,7 +597,7 @@ def status():
     import datetime
     from zoneinfo import ZoneInfo
     from streamwrangler.output import OUTPUT_PATH
-    from streamwrangler.epg import EPG_PATH, SPORTS_EPG_PATH
+    from streamwrangler.epg import EPG_PATH, SPORTS_EPG_PATH, LOGOS_EPG_PATH
     from streamwrangler.probe_cache import CACHE_PATH
 
     _LOCAL_TZ = ZoneInfo("America/Chicago")
@@ -520,6 +631,7 @@ def status():
     ts_table.add_row("Last output",    _age(OUTPUT_PATH))
     ts_table.add_row("Tennis EPG",     _age(EPG_PATH))
     ts_table.add_row("Sports EPG",     _age(SPORTS_EPG_PATH))
+    ts_table.add_row("Logos EPG",      _age(LOGOS_EPG_PATH))
     ts_table.add_row("Probe cache",    _age(CACHE_PATH))
     console.print(ts_table)
 

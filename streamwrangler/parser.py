@@ -34,8 +34,16 @@ def _parse_extinf(line: str) -> dict:
     attrs = {}
     for key, value in _ATTR_RE.findall(line):
         attrs[key.lower().replace("-", "_")] = value
-    # Display name is everything after the last comma
-    comma_pos = line.rfind(",")
+    # Display name is everything after the comma that follows the last attribute quote.
+    # Using rfind(",") breaks when the display name itself contains commas
+    # (e.g. "Opelka, Reilly vs Quinn, Ethan @ ...").
+    # Instead: find the last closing quote (end of last attribute value), then
+    # take the first comma after it — that's the attribute/name separator.
+    last_quote = line.rfind('"')
+    if last_quote != -1:
+        comma_pos = line.find(",", last_quote)
+    else:
+        comma_pos = line.rfind(",")
     attrs["display_name"] = line[comma_pos + 1:].strip() if comma_pos != -1 else ""
     return attrs
 

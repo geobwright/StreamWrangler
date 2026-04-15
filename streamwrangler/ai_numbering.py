@@ -7,8 +7,11 @@ Usage:
 """
 
 import json
+import os
+from pathlib import Path
 
 import anthropic
+import yaml
 
 from .store import ChannelRecord
 from .numbering import NumberingPlan, NumberingBlock, NumberedChannel, build_output_display_name
@@ -62,6 +65,7 @@ Required blocks in this exact order:
   US PPV             start: 900   (US PPV events — NFL, MLB, NHL, UFC, Golf, MLS, DAZN US)
   UK Football PPV    start: 930   (EPL team feeds, Championship, La Liga PPV, UEFA PPV, live football)
   UK Events PPV      start: 960   (TNT Sport Events, Formula 1, DAZN UK, Rugby PPV, UFC UK)
+  Paramount+ PPV     start: 1100  (Paramount+ originals and on-demand content)
   Tennis PPV         start: 990   (all tennis feeds — ATP, WTA, Grand Slams, court-by-court)
 
 Rules:
@@ -73,7 +77,15 @@ Rules:
 Respond with ONLY valid JSON — no markdown fences, no explanation, no trailing text:
 {{"blocks": [{{"name": "US Broadcast", "start": 100, "channels": [{{"uid": "...", "number": 101, "display_name": "..."}}]}}]}}"""
 
-    client = anthropic.Anthropic()
+    cfg = yaml.safe_load(Path("config/config.local.yaml").read_text())
+    # Temporarily unset ANTHROPIC_API_KEY to avoid SDK auth conflict warning when
+    # both a claude.ai session token and the env var are present simultaneously.
+    _env_key = os.environ.pop("ANTHROPIC_API_KEY", None)
+    try:
+        client = anthropic.Anthropic(api_key=cfg["anthropic_api_key"])
+    finally:
+        if _env_key is not None:
+            os.environ["ANTHROPIC_API_KEY"] = _env_key
     response = client.messages.create(
         model="claude-opus-4-6",
         max_tokens=8096,

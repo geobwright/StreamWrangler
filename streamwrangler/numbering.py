@@ -144,6 +144,90 @@ def save_numbering(plan: NumberingPlan, path: Path = NUMBERING_PATH) -> None:
     path.write_text(yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False))
 
 
+# Start numbers for target groups not in the standard AI block list.
+# Used when merge_new_channels needs to create a block from scratch.
+_FALLBACK_BLOCK_STARTS: dict[str, int] = {
+    "Paramount+ PPV": 1100,
+}
+
+
+def rebase_block(block: NumberingBlock, new_start: int) -> None:
+    """
+    Renumber all channels in a block sequentially from new_start.
+    PPV blocks (no gaps): new_start, new_start+1, new_start+2, ...
+    Non-PPV blocks (5-number gaps): new_start+5, new_start+10, ...
+    """
+    is_ppv = "PPV" in block.name
+    step = 1 if is_ppv else 5
+    for i, ch in enumerate(block.channels):
+        ch.number = new_start + i * step
+    block.start = new_start
+
+
+def fix_block_starts(plan: NumberingPlan) -> list[str]:
+    """
+    Detect blocks whose channel numbers don't match their registered start in
+    _FALLBACK_BLOCK_STARTS and rebase them. Returns list of block names that were fixed.
+
+    This corrects numbering.yaml entries created before a start-number change.
+    """
+    fixed = []
+    for block in plan.blocks:
+        expected_start = _FALLBACK_BLOCK_STARTS.get(block.name)
+        if expected_start is None or not block.channels:
+            continue
+        current_min = min(ch.number for ch in block.channels)
+        if current_min != expected_start:
+            rebase_block(block, expected_start)
+            fixed.append(block.name)
+    return fixed
+
+
+def merge_new_channels(plan: NumberingPlan, channels: list[ChannelRecord]) -> int:
+    """
+    Find included channels not yet in the plan and append them to the end of
+    their matching block (matched by target_group == block.name).
+
+    If no matching block exists, creates one using _FALLBACK_BLOCK_STARTS (or 800
+    as a catch-all) so truly new groups still appear in the TUI.
+
+    Returns the count of newly added channels.
+    """
+    planned_uids = {ch.uid for _, ch in plan.all_channels()}
+    block_by_name = {b.name: b for b in plan.blocks}
+    added = 0
+
+    for ch in channels:
+        if ch.status != "included":
+            continue
+        if ch.channel_uid in planned_uids:
+            continue
+
+        block = block_by_name.get(ch.target_group)
+        if block is None:
+            start = _FALLBACK_BLOCK_STARTS.get(ch.target_group, 800)
+            block = NumberingBlock(name=ch.target_group, start=start)
+            plan.blocks.append(block)
+            block_by_name[ch.target_group] = block
+
+        is_ppv = "PPV" in block.name
+        if block.channels:
+            last_num = max(c.number for c in block.channels)
+            next_num = last_num + (1 if is_ppv else 5)
+        else:
+            next_num = block.start + (0 if is_ppv else 5)
+
+        block.channels.append(NumberedChannel(
+            uid=ch.channel_uid,
+            number=next_num,
+            display_name=build_output_display_name(ch),
+        ))
+        planned_uids.add(ch.channel_uid)
+        added += 1
+
+    return added
+
+
 def apply_numbering(plan: NumberingPlan, channels: list[ChannelRecord]) -> int:
     """
     Apply numbering plan to channel records in place.
