@@ -27,8 +27,16 @@ wrangle number                  # generate AI proposal (if no numbering.yaml) th
 wrangle number --generate       # force-regenerate AI proposal, overwrite numbering.yaml
 wrangle number --apply          # apply numbering.yaml to channels.json headlessly
 
-# Generate EPG from PPV channel names
-wrangle epg                     # build XMLTV EPG → Dispatcharr epgs/
+# Generate EPG from PPV channel names + SportsDB team channels
+wrangle epg                     # build all four XMLTV EPGs → Dispatcharr epgs/
+
+# Download and match channel logos
+wrangle logos                   # match to tv-logo/tv-logos repo, download 512×512 PNGs
+wrangle logos --push            # also push to Dispatcharr via REST API
+wrangle logos --dry-run         # report matches without downloading
+
+# Write final M3U to Dispatcharr
+wrangle output
 
 # Inspect feed without ingesting
 wrangle analyze                 # group/channel counts from provider URL
@@ -51,8 +59,13 @@ streamwrangler/
   probe_cache.py    — probe result cache keyed by stable channel ID (last URL path segment)
   numbering.py      — YAML-backed channel numbering; language tag detection; display name builder
   ai_numbering.py   — Claude API (opus-4-6) proposal for block grouping and number assignment
+  epg.py            — Tennis/Paramount+/Logos XMLTV generators + SportsDB XMLTV builder
+  sportsdb.py       — TheSportsDB API client (free tier, rate limiter, team/venue/table lookups)
+  logos.py          — Logo matcher/downloader (tv-logo/tv-logos) + Dispatcharr REST push
+  tennis_rankings.py — ATP/WTA player rank lookup + 7-day cache (TheSportsDB)
+  output.py         — M3U generator → Dispatcharr path
 cli/
-  commands.py       — Typer CLI: ingest, inspect, curate, number, analyze, filter-report, status
+  commands.py       — Typer CLI: ingest, inspect, curate, number, epg, logos, output, analyze, status
 tui/
   app.py            — Textual TUI for include/exclude curation (wrangle curate)
   inspect.py        — Textual TUI for raw feed browsing and pre-ingest probing (wrangle inspect)
@@ -61,6 +74,7 @@ config/
   groups.yaml           — source group → target group mapping (prefix or exact)
   normalization.yaml    — strip/replace rules for name cleaning
   numbering.yaml        — AI-proposed + user-adjusted channel numbering plan (gitignored)
+  sportsdb.yaml         — TheSportsDB team configs for sports EPG (gitignored)
   config.local.yaml     — provider URL (GITIGNORED)
 data/
   channels.json         — canonical channel store (decisions persist here)
@@ -76,7 +90,8 @@ wrangle inspect         → search channel families (e.g. "eurosport"), probe va
 wrangle ingest --force  → re-run dedup using probe cache for accurate scoring
 wrangle curate          → include/exclude with quality already verified
 wrangle number          → AI proposes block/number layout → review in TUI → apply
-wrangle output          → (not yet built) write M3U to Dispatcharr path
+wrangle output          → write M3U to Dispatcharr path
+wrangle epg             → generate all four XMLTV EPGs (sports, tennis, paramount+, logos)
 ```
 
 The probe cache (`data/probe_cache.json`) persists across all commands and is never
@@ -286,8 +301,57 @@ Applied in `filter_channels()` before any downstream processing:
   contamination but are not valid provider streams. Remove the `://pro.` check if the
   domain returns as a legitimate source.
 
+## EPG System
+
+`wrangle epg` writes four XMLTV files in one run:
+
+| File | Source | Channel IDs |
+|---|---|---|
+| `wrangle_sports.xml` | TheSportsDB live API | `WrangleSports_LFC`, `_RMA`, `_WXM` |
+| `wrangle_tennis.xml` | Tennis PPV channel names | `WrangleTennis01`–`NN` |
+| `wrangle_paramount.xml` | Paramount+ PPV channel names | `WrangleParamount01`–`NN` |
+| `wrangle_logos.xml` | channels.json (icon delivery only) | same IDs as M3U |
+
+### Tennis PPV EPG
+
+**Timed format:** `"Last, First vs Last, First @ Apr 12 15:00 PM - ATP Monte Carlo :Tennis  03"`
+- Times in Europe/Paris → converted to UTC
+- Pre-event: per-block countdown titles; Live: 3h block; Post: "Signing Off" filler
+
+**No-time format fallback:** `"Boulter, Katie vs Cristian, Jaqueline - WTA Rouen :Tennis 03"`
+- Produces `"TBD: Katie Boulter vs Jaqueline Cristian · WTA Rouen"` tiled across today (Chicago midnight-to-midnight)
+- SportsDB is NOT used as fallback — free tier has no player-based event lookup
+
+Player names always reordered "Last, First" → "First Last" in titles/descriptions.
+Window: 36h from now. Display timezone: America/Chicago.
+
+### Paramount+ PPV EPG
+
+Channel name format: `"Title @ Apr 14 2:50 PM :Paramount+  07"` (12h time, US Eastern TZ)
+- Sports vs entertainment auto-detected via keyword list
+- Sports: 3h block + Sports category; Entertainment: 2h + Entertainment category
+- SportsDB venue lookup for soccer matches
+
+### Sports Team EPG
+
+Config: `config/sportsdb.yaml` (gitignored). Uses TheSportsDB free tier (`"123"`, 30 req/min).
+`strTimestamp` from events API is UTC. All times displayed in America/Chicago.
+Current teams: Liverpool FC (`133602`), Real Madrid (`133738`), Wrexham (`134775`).
+
+### Logos EPG
+
+Channel declarations only with 24h placeholder programmes. All included channels with a
+`tvg_logo` set appear here. Purpose: single icon-delivery source for Dispatcharr.
+
+## Logo Pipeline — wrangle logos
+
+Matches included channels to the `tv-logo/tv-logos` GitHub repo by normalizing display names.
+Downloads logos and resizes/pads to 512×512 transparent PNG.
+`--push` updates Dispatcharr via REST API immediately.
+`--dry-run` reports matches without downloading or modifying channels.json.
+
 ## What's Not Built Yet
 
-- `wrangle status` dashboard improvements
+- Direct provider Xtream Codes access for fresher PPV names (bypasses IPTVEditor 2–3h cache) — deferred
 - Claude API classifier for auto-suggest on pending channels
-- EPG support for other PPV groups (UK Football PPV, UK Events PPV, US PPV)
+- EPG support for UK Football PPV, UK Events PPV, US PPV groups
